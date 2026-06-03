@@ -1,5 +1,4 @@
-"""
-Auth dependency builder for fastapi-m8 services.
+"""Auth dependency builder for fastapi-m8 services.
 
 Call ``build_auth_deps(settings)`` **once** per service in ``core/deps.py``
 and share the resulting ``AuthDeps`` instance everywhere.  A second call
@@ -90,8 +89,7 @@ class _LoggingHooks:
 
 @dataclass(frozen=True)
 class AuthDeps:
-    """
-    Frozen container for all auth-related FastAPI dependencies.
+    """Frozen container for all auth-related FastAPI dependencies.
 
     Attributes
     ----------
@@ -121,8 +119,7 @@ class AuthDeps:
 
 
 def build_auth_deps(settings: ConsumerServiceSettings) -> AuthDeps:
-    """
-    Build the auth dependency set from service settings.
+    """Build the auth dependency set from service settings.
 
     Call once at module load in ``core/deps.py``.  A second call creates a
     second validator and revocation client without sharing state.

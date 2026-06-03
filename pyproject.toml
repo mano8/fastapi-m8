@@ -55,15 +55,12 @@ select = ["E", "F", "I", "W", "UP", "C90", "D"]
 ignore = [
     "E501",
     "D100", "D104", "D105", "D107",
-    "D211", "D212", "D215",
+    "D203", "D213", "D215",
     "D301", "D401", "D403", "D404", "D415", "D416", "D417",
 ]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
-
-[tool.ruff.lint.pydocstyle]
-convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
@@ -71,8 +68,6 @@ convention = "numpy"
 [tool.ruff.lint.isort]
 known-first-party = ["fastapi_m8"]
 
-[tool.pydocstyle]
-convention = "numpy"
 
 [tool.mypy]
 python_version = "3.11"

@@ -1,2 +1,2 @@
 [pydocstyle]
-convention = google
+convention = pep257

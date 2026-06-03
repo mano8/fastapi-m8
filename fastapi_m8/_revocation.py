@@ -1,5 +1,4 @@
-"""
-Async HTTP revocation client — internal to fastapi-m8.
+"""Async HTTP revocation client — internal to fastapi-m8.
 
 Checks JTI status via the auth service private introspection endpoint.
 Instantiated only by ``build_auth_deps``; never import directly.
@@ -17,8 +16,7 @@ class RevocationCheckError(Exception):
 
 
 class RemoteRevocationClient:
-    """
-    Async HTTP client for JTI revocation checks.
+    """Async HTTP client for JTI revocation checks.
 
     Fail-open by default: an unreachable auth service treats the token as
     active.  Set ``fail_closed=True`` to reject tokens when the endpoint is
@@ -48,8 +46,7 @@ class RemoteRevocationClient:
         )
 
     async def is_revoked(self, jti: str) -> bool:
-        """
-        Return True when the JTI has been revoked.
+        """Return True when the JTI has been revoked.
 
         On network/HTTP error: returns False (fail-open) unless
         ``fail_closed=True``, in which case ``RevocationCheckError`` is raised.
