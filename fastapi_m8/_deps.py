@@ -6,8 +6,6 @@ and share the resulting ``AuthDeps`` instance everywhere.  A second call
 builds a second validator and revocation client — there is no implicit cache.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -125,7 +123,7 @@ class AuthDeps:
             await self.revocation_client.close()
 
 
-def build_auth_deps(settings: ConsumerServiceSettings) -> AuthDeps:
+def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
     """
     Build the auth dependency set from service settings.
 
@@ -176,13 +174,15 @@ def build_auth_deps(settings: ConsumerServiceSettings) -> AuthDeps:
 
     CurrentUser = Annotated[UserModel, Depends(get_current_user)]
 
-    def get_current_active_admin(current_user: CurrentUser) -> UserModel:  # type: ignore[valid-type]
+    def get_current_active_admin(
+        current_user: UserModel = Depends(get_current_user),
+    ) -> UserModel:
         """Verify at least ADMIN role."""
         _require_role(current_user, RoleType.ADMIN)
         return current_user
 
     def get_current_active_superuser(
-        current_user: CurrentUser,  # type: ignore[valid-type]
+        current_user: UserModel = Depends(get_current_user),
     ) -> UserModel:
         """Verify SUPERADMIN role."""
         if not current_user.is_superuser:
