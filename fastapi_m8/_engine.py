@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 @dataclass
 class DbEngine:
-
     """
     Public wrapper around a SQLAlchemy/SQLModel engine.
 

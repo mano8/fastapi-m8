@@ -13,12 +13,10 @@ _logger = logging.getLogger(__name__)
 
 
 class RevocationCheckError(Exception):
-
     """Raised when the revocation check fails in fail-closed mode."""
 
 
 class RemoteRevocationClient:
-
     """
     Async HTTP client for JTI revocation checks.
 

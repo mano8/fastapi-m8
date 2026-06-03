@@ -79,7 +79,6 @@ def _require_role(current_user: UserModel, role_limit: RoleType) -> None:
 
 
 class _LoggingHooks:
-
     """Emit structured log lines for every token validation outcome."""
 
     def on_success(self, *, jti: str, sub: str, token_type: str) -> None:
@@ -91,7 +90,6 @@ class _LoggingHooks:
 
 @dataclass(frozen=True)
 class AuthDeps:
-
     """
     Frozen container for all auth-related FastAPI dependencies.
 

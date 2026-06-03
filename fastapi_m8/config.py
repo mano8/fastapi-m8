@@ -27,7 +27,6 @@ from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
 class ConsumerServiceSettings(
     ObservabilitySettingsMixin, ConsumerAuthMixin, CommonSettings
 ):
-
     """
     Base settings for a consumer FastAPI microservice.
 

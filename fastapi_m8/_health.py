@@ -51,7 +51,6 @@ def _scrub_meta(meta: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 class HealthStatus(StrEnum):
-
     """Possible states for a single health check or aggregate."""
 
     OK = "ok"
@@ -66,7 +65,6 @@ class HealthStatus(StrEnum):
 
 
 class HealthAggregatePolicy(StrEnum):
-
     """
     Policy for mapping individual check statuses to an HTTP status code.
 
@@ -80,7 +78,6 @@ class HealthAggregatePolicy(StrEnum):
 
 @runtime_checkable
 class HealthCheck(Protocol):
-
     """Protocol for health-check callables."""
 
     async def __call__(self) -> HealthCheckResult:
@@ -89,7 +86,6 @@ class HealthCheck(Protocol):
 
 
 class HealthCheckResult(BaseModel):
-
     """
     Result of a single health check.
 

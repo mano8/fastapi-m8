@@ -48,7 +48,6 @@ _CORS_HEADERS = ["Authorization", "Content-Type", "X-Requested-With"]
 
 @dataclass
 class HealthConfig:
-
     """
     Configuration for the health endpoint.
 
@@ -81,7 +80,6 @@ class HealthConfig:
 
 @dataclass
 class AppLifecycle:
-
     """
     App lifecycle configuration.
 
