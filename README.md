@@ -1,5 +1,12 @@
 # fastapi-m8
 
+![CI/CD](https://github.com/mano8/fastapi-m8/actions/workflows/CI.yaml/badge.svg?branch=main)
+[![PyPI version](https://img.shields.io/pypi/v/fastapi-m8)](https://pypi.org/project/fastapi-m8/)
+[![Python](https://img.shields.io/pypi/pyversions/fastapi-m8)](https://pypi.org/project/fastapi-m8/)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/fastapi-m8?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/fastapi-m8)
+[![codecov](https://codecov.io/gh/mano8/fastapi-m8/graph/badge.svg?token=TF6OGIHOGF)](https://codecov.io/gh/mano8/fastapi-m8)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/8b8e9726b0f8441ea480902ea8910812)](https://app.codacy.com/gh/mano8/fastapi-m8/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+
 FastAPI application framework for building consumer microservices that integrate with
 [fa-auth-m8](../fa-auth-m8). It wires authentication, CORS, health checks, observability,
 and database lifecycle into a single `create_app()` call, removing ~90 % of the setup
