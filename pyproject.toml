@@ -38,7 +38,8 @@ all      = ["fastapi-m8[db,mysql,postgres]"]
 dev      = ["fastapi-m8[all]", "pytest>=8.0", "anyio[trio]>=4.0", "httpx",
             "ruff>=0.9.0", "mypy>=1.14.0", "bandit>=1.8.0",
             "pytest-anyio>=0.0.0", "tenacity>=9.0",
-            "coverage>=7.0", "pytest-cov>=6.0"]
+            "coverage>=7.0", "pytest-cov>=6.0",
+            "asgi-lifespan>=2.0"]
 
 [project.scripts]
 fastapi-m8-prestart = "fastapi_m8.scripts.pre_start:main"
@@ -72,6 +73,9 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = ["fastapi_m8"]
+
+[tool.pydocstyle]
+convention = "google"
 
 [tool.mypy]
 python_version = "3.11"

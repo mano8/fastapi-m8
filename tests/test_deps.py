@@ -49,7 +49,7 @@ def test_logging_hooks_on_success_logs_debug(caplog) -> None:
     hooks = _LoggingHooks()
     with caplog.at_level(logging.DEBUG, logger="fastapi_m8._deps"):
         hooks.on_success(jti="j1", sub="u1", token_type="access")
-    assert "token.valid" in caplog.text
+    assert "auth.ok" in caplog.text
 
 
 def test_logging_hooks_on_failure_logs_warning(caplog) -> None:
@@ -57,7 +57,7 @@ def test_logging_hooks_on_failure_logs_warning(caplog) -> None:
     hooks = _LoggingHooks()
     with caplog.at_level(logging.WARNING, logger="fastapi_m8._deps"):
         hooks.on_failure(reason="expired", token_type="access")
-    assert "token.invalid" in caplog.text
+    assert "auth.fail" in caplog.text
 
 
 # ── build_auth_deps ───────────────────────────────────────────────────────────
