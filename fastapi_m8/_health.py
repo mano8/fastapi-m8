@@ -27,7 +27,6 @@ _SENSITIVE_KEY = re.compile(
 _CRED_IN_URL = re.compile(r"://[^/\s:@]+:[^/\s@]+@")
 
 DEFAULT_TIMEOUT: float = 0.5
-STARTUP_GRACE_SECONDS: float = 30.0
 
 
 def _scrub_text(text: str | None) -> str | None:
@@ -121,14 +120,6 @@ class HealthCheckResult(BaseModel):
             status=HealthStatus.from_bool(ok),
             meta=meta or None,
         )
-
-
-def is_in_grace(
-    ready_since: float | None,
-    grace: float = STARTUP_GRACE_SECONDS,
-) -> bool:
-    """Return True while within the post-ready startup grace window."""
-    return ready_since is not None and (time.monotonic() - ready_since) < grace
 
 
 def _check_name(check: HealthCheck) -> str:

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Add future dependencies here without touching any other code.
 COMPAT_MATRIX: dict[str, dict[str, str]] = {
     "1.0": {"auth-sdk-m8": ">=0.7.0,<0.8.0"},
+    "1.1": {"auth-sdk-m8": ">=0.7.1,<0.8.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
