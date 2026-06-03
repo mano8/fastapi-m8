@@ -55,6 +55,11 @@ async def _check_token_revocation(
                 detail="Token has been revoked.",
             )
     except RevocationCheckError as ex:
+        _logger.warning(
+            "security.revocation_denied jti=%s reason=unverifiable error=%s",
+            jti,
+            ex,
+        )
         raise HTTPException(
             status_code=_UNAVAILABLE,
             detail="Token revocation check unavailable.",
@@ -145,9 +150,17 @@ def build_auth_deps(settings: ConsumerServiceSettings) -> AuthDeps:
 
     revocation_client: RemoteRevocationClient | None = None
     if settings.is_stateful and settings.AUTH_SERVICE_ROLE == "consumer":
+        revocation_mode = settings.effective_failure_mode("access_revocation")
+        _logger.info(
+            "revocation.mode effective=%s (ACCESS_REVOCATION_FAILURE_MODE=%s, AUTH_STRICT_MODE=%s)",
+            revocation_mode,
+            settings.ACCESS_REVOCATION_FAILURE_MODE,
+            settings.AUTH_STRICT_MODE,
+        )
         revocation_client = RemoteRevocationClient(
             introspection_url=str(settings.INTROSPECTION_URL),
             private_api_secret=settings.PRIVATE_API_SECRET.get_secret_value(),  # type: ignore[union-attr]
+            fail_closed=(revocation_mode == "fail_closed"),
         )
 
     reusable_oauth2 = OAuth2PasswordBearer(

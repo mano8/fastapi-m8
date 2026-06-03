@@ -73,7 +73,9 @@ health checks; the framework wires the rest.
 ┌───────────────────────────────────────────────────────────────┐
 │  Your consumer service  (uses fastapi-m8)                     │
 │                                                               │
-│  create_app(settings, router, auth_deps=auth, ...)           │
+│  create_app(settings, router,                                 │
+│      health=HealthConfig(checks=[...]),                       │
+│      lifecycle=AppLifecycle(auth_deps=auth, ...))            │
 │  ├─ ConsumerServiceSettings ← auth-sdk-m8 CommonSettings     │
 │  ├─ build_auth_deps(settings)                                 │
 │  │   ├─ TokenValidator (local JWT check, auth-sdk-m8)        │
@@ -179,7 +181,9 @@ async def list_items(user: auth.CurrentUser, session: SessionDep):
 ```python
 # app/main.py
 from fastapi import APIRouter
-from fastapi_m8 import create_app, HealthCheckResult, HealthStatus
+from fastapi_m8 import (
+    AppLifecycle, HealthConfig, create_app, HealthCheckResult, HealthStatus,
+)
 from sqlmodel import select
 from app.core.config import settings
 from app.core.deps import auth, engine
@@ -201,9 +205,8 @@ app = create_app(
     api_router,
     service_name="Item Service",
     service_version="1.0.0",
-    auth_deps=auth,
-    db_engine=engine,
-    health_checks=[check_db],
+    health=HealthConfig(checks=[check_db]),
+    lifecycle=AppLifecycle(auth_deps=auth, db_engine=engine),
 )
 ```
 
@@ -336,7 +339,7 @@ do not connect to Redis directly.
 ### `create_app()`
 
 ```python
-from fastapi_m8 import create_app
+from fastapi_m8 import create_app, HealthConfig, AppLifecycle
 
 app = create_app(
     settings: ConsumerServiceSettings,
@@ -344,17 +347,8 @@ app = create_app(
     *,
     service_name: str | None = None,
     service_version: str | None = None,
-    auth_deps: AuthDeps | None = None,
-    db_engine: DbEngine | None = None,
-    health_checks: list[HealthCheck] | None = None,
-    health_check_timeout: float = 0.5,
-    health_policy: HealthAggregatePolicy = HealthAggregatePolicy.LENIENT,
-    health_detail_public: bool = False,
-    health_detail_authorizer: Callable | None = None,
-    health_cache_ttl: float = 2.0,
-    startup_validators: list[Callable] | None = None,
-    configure: Callable[[FastAPI], None] | None = None,
-    lifespan_extras: Callable | None = None,
+    health: HealthConfig | None = None,
+    lifecycle: AppLifecycle | None = None,
 ) -> FastAPI
 ```
 
@@ -366,27 +360,39 @@ app = create_app(
 | `router` | Your domain `APIRouter` (all routes are mounted under this) |
 | `service_name` | Overrides `settings.PROJECT_NAME` in health detail response |
 | `service_version` | Reported in health detail response |
-| `auth_deps` | Output of `build_auth_deps()`. Closed on shutdown |
-| `db_engine` | Output of `create_db_engine()`. Disposed on shutdown |
-| `health_checks` | List of async callables returning `HealthCheckResult` |
-| `health_check_timeout` | Per-check timeout in seconds (default `0.5`) |
-| `health_policy` | `LENIENT` (default) or `STRICT` — controls when 503 is returned |
-| `health_detail_public` | Expose check details without authentication |
-| `health_detail_authorizer` | Custom async callable; receives `Request`, return `bool` |
-| `health_cache_ttl` | How long to cache health results in seconds (default `2.0`) |
-| `startup_validators` | Async callables run before app signals ready; raise to abort |
-| `configure` | Callback receiving the raw `FastAPI` instance for custom middleware |
-| `lifespan_extras` | Async context manager run inside the managed lifespan |
+| `health` | `HealthConfig` dataclass (checks, timeout, policy, detail options, cache TTL) |
+| `lifecycle` | `AppLifecycle` dataclass (auth_deps, db_engine, startup_validators, configure, lifespan_extras) |
+
+**`HealthConfig` fields:**
+
+| Field | Default | Description |
+|---|---|---|
+| `checks` | `None` | List of async callables returning `HealthCheckResult` |
+| `timeout` | `0.5` | Per-check timeout in seconds |
+| `policy` | `LENIENT` | `LENIENT` or `STRICT` — controls when 503 is returned |
+| `detail_public` | `False` | Expose per-check detail without authentication |
+| `detail_authorizer` | `None` | Custom async callable; receives `Request`, returns `bool` |
+| `cache_ttl` | `2.0` | Seconds to cache health results |
+
+**`AppLifecycle` fields:**
+
+| Field | Default | Description |
+|---|---|---|
+| `auth_deps` | `None` | Output of `build_auth_deps()`. Closed on shutdown |
+| `db_engine` | `None` | Output of `create_db_engine()`. Disposed on shutdown |
+| `startup_validators` | `None` | Async callables run before app signals ready; raise to abort |
+| `configure` | `None` | Callback receiving the raw `FastAPI` instance for custom middleware |
+| `lifespan_extras` | `None` | Async context manager run inside the managed lifespan |
 
 **Lifespan sequence:**
 
-1. Run `startup_validators` — raise any exception to prevent ready signal.
-2. Enter `lifespan_extras` context (if provided).
+1. Run `lifecycle.startup_validators` — raise any exception to prevent ready signal.
+2. Enter `lifecycle.lifespan_extras` context (if provided).
 3. Set `app.state.service_ready = True`.
 4. *(app serves traffic)*
-5. Exit `lifespan_extras`.
-6. Call `auth_deps.close()` (closes revocation HTTP client).
-7. Call `db_engine.dispose()` (closes connection pool).
+5. Exit `lifecycle.lifespan_extras`.
+6. Call `lifecycle.auth_deps.close()` (closes revocation HTTP client).
+7. Call `lifecycle.db_engine.dispose()` (closes connection pool).
 
 ---
 
@@ -642,7 +648,7 @@ HTTP 200
   ],
   "service": "Item Service",
   "version": "1.0.0",
-  "fastapi_m8": "1.0.0",
+  "fastapi_m8": "1.1.0",
   "auth_sdk_m8": "0.7.x"
 }
 ```
@@ -650,18 +656,24 @@ HTTP 200
 **Authorization options:**
 
 ```python
+from fastapi_m8 import create_app, HealthConfig
+
 # Option A — built-in X-Internal-Token (requires PRIVATE_API_SECRET in settings)
-app = create_app(settings, router, health_checks=[check_db])
+app = create_app(settings, router, health=HealthConfig(checks=[check_db]))
 # Pass header: X-Internal-Token: <PRIVATE_API_SECRET>
 
 # Option B — always public
-app = create_app(settings, router, health_checks=[check_db], health_detail_public=True)
+app = create_app(settings, router, health=HealthConfig(checks=[check_db], detail_public=True))
 
 # Option C — custom authorizer
 async def is_internal(request: Request) -> bool:
     return request.client.host == "10.0.0.1"
 
-app = create_app(settings, router, health_checks=[check_db], health_detail_authorizer=is_internal)
+app = create_app(
+    settings,
+    router,
+    health=HealthConfig(checks=[check_db], detail_authorizer=is_internal),
+)
 ```
 
 ---
@@ -794,7 +806,9 @@ async def delete_item(
 ```python
 from fastapi import APIRouter
 from sqlmodel import select
-from fastapi_m8 import create_app, HealthCheckResult, HealthStatus
+from fastapi_m8 import (
+    AppLifecycle, HealthConfig, create_app, HealthCheckResult, HealthStatus,
+)
 from app.core.config import settings
 from app.core.deps import auth, engine
 from app.api.items import router as items_router
@@ -815,9 +829,8 @@ app = create_app(
     api_router,
     service_name="Item Service",
     service_version="1.0.0",
-    auth_deps=auth,
-    db_engine=engine,
-    health_checks=[check_db],
+    health=HealthConfig(checks=[check_db]),
+    lifecycle=AppLifecycle(auth_deps=auth, db_engine=engine),
 )
 ```
 
@@ -885,6 +898,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `1.1.x` | `>=0.7.1, <0.8.0` | 3.11, 3.12, 3.13 |
 | `1.0.x` | `>=0.7.0, <0.8.0` | 3.11, 3.12, 3.13 |
 
 The compatibility matrix is enforced at startup via `COMPAT_MATRIX`. A

@@ -1,7 +1,5 @@
 """Tests for fastapi_m8._health."""
 
-import time
-
 import pytest
 from anyio import sleep as anyio_sleep
 
@@ -10,7 +8,6 @@ from fastapi_m8._health import (
     HealthCheckResult,
     HealthStatus,
     aggregate,
-    is_in_grace,
     run_check,
 )
 
@@ -110,21 +107,6 @@ def test_meta_string_value_dsn_scrubbed() -> None:
     )
     dumped = r.model_dump()
     assert "pass" not in dumped["meta"]["endpoint"]
-
-
-# ── is_in_grace ───────────────────────────────────────────────────────────────
-
-
-def test_is_in_grace_none() -> None:
-    assert is_in_grace(None) is False
-
-
-def test_is_in_grace_within() -> None:
-    assert is_in_grace(time.monotonic(), grace=30.0) is True
-
-
-def test_is_in_grace_expired() -> None:
-    assert is_in_grace(time.monotonic() - 60.0, grace=30.0) is False
 
 
 # ── aggregate ─────────────────────────────────────────────────────────────────
