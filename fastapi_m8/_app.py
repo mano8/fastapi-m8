@@ -1,4 +1,5 @@
-"""App factory for fastapi-m8 consumer services.
+"""
+App factory for fastapi-m8 consumer services.
 
 ``create_app`` wires CORS, optional metrics middleware, the health endpoint,
 OpenAPI schema, and a managed lifespan (startup validators + graceful teardown).
@@ -47,7 +48,9 @@ _CORS_HEADERS = ["Authorization", "Content-Type", "X-Requested-With"]
 
 @dataclass
 class HealthConfig:
-    """Configuration for the health endpoint.
+
+    """
+    Configuration for the health endpoint.
 
     Attributes
     ----------
@@ -78,7 +81,9 @@ class HealthConfig:
 
 @dataclass
 class AppLifecycle:
-    """App lifecycle configuration.
+
+    """
+    App lifecycle configuration.
 
     Attributes
     ----------
@@ -287,7 +292,8 @@ def create_app(
     health: HealthConfig | None = None,
     lifecycle: AppLifecycle | None = None,
 ) -> FastAPI:
-    """Wire and return a consumer FastAPI app.
+    """
+    Wire and return a consumer FastAPI app.
 
     Parameters
     ----------

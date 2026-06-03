@@ -1,4 +1,5 @@
-"""fastapi-m8 — FastAPI application framework for m8 consumer microservices.
+"""
+fastapi-m8 — FastAPI application framework for m8 consumer microservices.
 
 Public surface (stable):
 
