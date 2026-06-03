@@ -147,10 +147,16 @@ def _add_metrics_middleware(app: FastAPI, settings: ConsumerServiceSettings) -> 
     if not settings.METRICS_ENABLED:
         return
     try:
+        from auth_sdk_m8.observability.metrics import setup  # noqa: PLC0415
         from auth_sdk_m8.observability.middleware import (  # noqa: PLC0415
             MetricsMiddleware,
         )
 
+        setup(
+            enabled=settings.METRICS_ENABLED,
+            groups_str=settings.METRICS_GROUPS,
+            api_prefix=settings.API_PREFIX,
+        )
         app.add_middleware(MetricsMiddleware)
     except ImportError:  # pragma: no cover — only fires without [observability] extra
         logger.warning(
@@ -229,7 +235,7 @@ def _openapi_config(
         ),
         "docs_url": f"{settings.API_PREFIX}/docs" if settings.SET_DOCS else None,
         "redoc_url": f"{settings.API_PREFIX}/redoc" if settings.SET_REDOC else None,
-        "generate_unique_id_function": lambda r: f"{r.tags[0]}-{r.name}",
+        "generate_unique_id_function": lambda r: f"{r.tags[0] if r.tags else r.name}-{r.name}",
     }
 
 
