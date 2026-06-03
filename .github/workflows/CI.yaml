@@ -90,7 +90,7 @@ jobs:
         run: pip install -e ".[all,dev]"
 
       - name: Run tests
-        run: pytest --cov-report=xml
+        run: pytest
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11' && github.actor != 'dependabot[bot]'

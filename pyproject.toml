@@ -84,3 +84,4 @@ strict = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=fastapi_m8 --cov-report=xml --cov-report=term-missing"
