@@ -1,4 +1,5 @@
-"""App factory for fastapi-m8 consumer services.
+"""
+App factory for fastapi-m8 consumer services.
 
 ``create_app`` wires CORS, optional metrics middleware, the health endpoint,
 OpenAPI schema, and a managed lifespan (startup validators + graceful teardown).
@@ -12,6 +13,7 @@ import secrets
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import anyio
@@ -42,6 +44,65 @@ StartupValidator = Callable[[], Awaitable[None]]
 
 _CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 _CORS_HEADERS = ["Authorization", "Content-Type", "X-Requested-With"]
+
+
+@dataclass
+class HealthConfig:
+    """
+    Configuration for the health endpoint.
+
+    Attributes
+    ----------
+    checks
+        List of health-check callables returning HealthCheckResult.
+    timeout
+        Per-check timeout in seconds.
+    policy
+        LENIENT (default) or STRICT aggregate policy.
+    detail_public
+        If True, expose per-check detail to everyone.
+    detail_authorizer
+        Override the default X-Internal-Token gate.
+    cache_ttl
+        Seconds to cache health-check results.
+
+    """
+
+    checks: list[HealthCheck] | None = None
+    timeout: float = DEFAULT_TIMEOUT
+    policy: HealthAggregatePolicy = field(
+        default_factory=lambda: HealthAggregatePolicy.LENIENT
+    )
+    detail_public: bool = False
+    detail_authorizer: Callable[[Request], bool | Awaitable[bool]] | None = None
+    cache_ttl: float = 2.0
+
+
+@dataclass
+class AppLifecycle:
+    """
+    App lifecycle configuration.
+
+    Attributes
+    ----------
+    auth_deps
+        AuthDeps instance for token validation teardown.
+    db_engine
+        DbEngine instance to dispose on shutdown.
+    startup_validators
+        Async callables run before traffic; a raise aborts lifespan.
+    configure
+        Receives the fully-wired app for static additions.
+    lifespan_extras
+        Async context manager run inside the managed lifespan.
+
+    """
+
+    auth_deps: AuthDeps | None = None
+    db_engine: DbEngine | None = None
+    startup_validators: list[StartupValidator] | None = None
+    configure: Callable[[FastAPI], None] | None = None
+    lifespan_extras: Callable | None = None
 
 
 def _mark_ready(app: FastAPI) -> None:
@@ -172,14 +233,28 @@ def _openapi_config(
     }
 
 
+def _init_app_state(app: FastAPI) -> None:
+    app.state.service_ready = False
+    app.state.ready_since = None
+    app.state.health_cache = None
+
+
+def _add_cors_middleware(app: FastAPI, settings: ConsumerServiceSettings) -> None:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.ALLOWED_ORIGINS,
+        allow_credentials=True,
+        allow_methods=_CORS_METHODS,
+        allow_headers=_CORS_HEADERS,
+        max_age=3600,
+    )
+
+
 def _register_health_route(
     app: FastAPI,
     api_prefix: str,
     checks: list[HealthCheck],
-    health_check_timeout: float,
-    health_policy: HealthAggregatePolicy,
-    health_detail_public: bool,
-    health_cache_ttl: float,
+    config: HealthConfig,
     authorize: Callable[[Request], bool | Awaitable[bool]],
     service_name: str | None,
     service_version: str | None,
@@ -197,11 +272,11 @@ def _register_health_route(
                 {"status": "initializing", "ready": False}, status_code=503
             )
         results, overall, code = await _gather_health_results(
-            app, checks, health_check_timeout, health_policy, health_cache_ttl
+            app, checks, config.timeout, config.policy, config.cache_ttl
         )
         logger.debug("health: %s (%d checks)", overall.value, len(results))
         body: dict[str, Any] = {"status": overall.value}
-        if health_detail_public or await _is_authorized(request):
+        if config.detail_public or await _is_authorized(request):
             body |= _build_health_body(results, service_name, service_version)
         return JSONResponse(body, status_code=code)
 
@@ -212,96 +287,58 @@ def create_app(
     *,
     service_name: str | None = None,
     service_version: str | None = None,
-    auth_deps: AuthDeps | None = None,
-    db_engine: DbEngine | None = None,
-    health_checks: list[HealthCheck] | None = None,
-    health_check_timeout: float = DEFAULT_TIMEOUT,
-    health_policy: HealthAggregatePolicy = HealthAggregatePolicy.LENIENT,
-    health_detail_public: bool = False,
-    health_detail_authorizer: Callable[[Request], bool | Awaitable[bool]] | None = None,
-    health_cache_ttl: float = 2.0,
-    startup_validators: list[StartupValidator] | None = None,
-    configure: Callable[[FastAPI], None] | None = None,
-    lifespan_extras: Callable | None = None,
+    health: HealthConfig | None = None,
+    lifecycle: AppLifecycle | None = None,
 ) -> FastAPI:
-    """Wire and return a consumer FastAPI app.
+    """
+    Wire and return a consumer FastAPI app.
 
-    Args:
-        settings: Service settings (a ``ConsumerServiceSettings`` subclass).
-        router: The domain ``APIRouter`` to include.
-        service_name: Human-readable service name (falls back to
-            ``settings.PROJECT_NAME``).
-        service_version: Semantic version string for this service.
-        auth_deps: ``AuthDeps`` built by ``build_auth_deps()``.  Teardown
-            is called on shutdown.
-        db_engine: ``DbEngine`` built by ``create_db_engine()``.  Disposed on
-            shutdown.  Pass ``None`` for DB-less services.
-        health_checks: List of async callables returning
-            ``HealthCheckResult``.
-        health_check_timeout: Per-check timeout in seconds.
-        health_policy: ``LENIENT`` (default) or ``STRICT`` aggregate policy.
-        health_detail_public: If True, expose per-check detail to everyone.
-        health_detail_authorizer: Override the default ``X-Internal-Token``
-            gate.  Accepts sync or async callables.
-        health_cache_ttl: Seconds to cache health-check results.
-        startup_validators: Async callables run before traffic; a raise
-            aborts lifespan so the container never reports ready.
-        configure: Receives the fully-wired app for static additions
-            (middleware, exception handlers).
-        lifespan_extras: Async context manager run inside the managed
-            lifespan, after auth/engine exist and before their teardown.
+    Parameters
+    ----------
+    settings
+        Service settings (a ConsumerServiceSettings subclass).
+    router
+        The domain APIRouter to include.
+    service_name
+        Human-readable service name (falls back to settings.PROJECT_NAME).
+    service_version
+        Semantic version string for this service.
+    health
+        Health endpoint config; defaults to HealthConfig().
+    lifecycle
+        Lifecycle config (auth, engine, validators); defaults to AppLifecycle().
 
-    Returns:
-        A fully configured ``FastAPI`` instance.
+    Returns
+    -------
+    FastAPI
+        A fully configured instance.
+
     """
     _assert_compat()
-    checks = list(health_checks or [])
-
+    h = health or HealthConfig()
+    lc = lifecycle or AppLifecycle()
+    checks = list(h.checks or [])
     app = FastAPI(
         lifespan=_build_lifespan(
-            auth_deps, db_engine, startup_validators, lifespan_extras
+            lc.auth_deps, lc.db_engine, lc.startup_validators, lc.lifespan_extras
         ),
         **_openapi_config(settings, service_name, service_version),
     )
-    app.state.service_ready = False
-    app.state.ready_since = None
-    app.state.health_cache = None
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.ALLOWED_ORIGINS,
-        allow_credentials=True,
-        allow_methods=_CORS_METHODS,
-        allow_headers=_CORS_HEADERS,
-        max_age=3600,
-    )
-
+    _init_app_state(app)
+    _add_cors_middleware(app, settings)
     _add_metrics_middleware(app, settings)
-
-    authorize = health_detail_authorizer or _build_default_authorizer(settings)
+    authorize = h.detail_authorizer or _build_default_authorizer(settings)
     _register_health_route(
-        app,
-        settings.API_PREFIX,
-        checks,
-        health_check_timeout,
-        health_policy,
-        health_detail_public,
-        health_cache_ttl,
-        authorize,
-        service_name,
-        service_version,
+        app, settings.API_PREFIX, checks, h, authorize, service_name, service_version
     )
-
     app.include_router(router)
     logger.info(
-        "fastapi-m8 %s | service=%s version=%s | auth-sdk-m8=%s",
+        "fastapi-m8 %s svc=%s v=%s sdk=%s",
         __version__,
         service_name,
         service_version,
         _COMPAT_STATE.get("auth_version"),
     )
-
-    if configure is not None:
-        configure(app)
-
+    if lc.configure is not None:
+        lc.configure(app)
     return app

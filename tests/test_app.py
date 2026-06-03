@@ -12,8 +12,10 @@ from fastapi import APIRouter
 from httpx import ASGITransport, AsyncClient
 
 from fastapi_m8 import (
+    AppLifecycle,
     HealthAggregatePolicy,
     HealthCheckResult,
+    HealthConfig,
     HealthStatus,
     create_app,
 )
@@ -124,7 +126,9 @@ async def test_failing_check_returns_503(test_router: APIRouter) -> None:
     async def bad() -> HealthCheckResult:
         return HealthCheckResult(name="db", status=HealthStatus.FAIL)
 
-    a = create_app(make_settings(**_BASE), test_router, health_checks=[bad])
+    a = create_app(
+        make_settings(**_BASE), test_router, health=HealthConfig(checks=[bad])
+    )
     async with live_client(a) as client:
         resp = await client.get("/api/health/")
     assert resp.status_code == 503
@@ -141,8 +145,10 @@ async def test_degraded_check_lenient_returns_200(test_router: APIRouter) -> Non
     a = create_app(
         make_settings(**_BASE),
         test_router,
-        health_checks=[degraded],
-        health_policy=HealthAggregatePolicy.LENIENT,
+        health=HealthConfig(
+            checks=[degraded],
+            policy=HealthAggregatePolicy.LENIENT,
+        ),
     )
     async with live_client(a) as client:
         resp = await client.get("/api/health/")
@@ -160,8 +166,7 @@ async def test_health_detail_public_exposes_checks(test_router: APIRouter) -> No
     a = create_app(
         make_settings(**_BASE),
         test_router,
-        health_checks=[ok_check],
-        health_detail_public=True,
+        health=HealthConfig(checks=[ok_check], detail_public=True),
     )
     async with live_client(a) as client:
         resp = await client.get("/api/health/")
@@ -184,8 +189,7 @@ async def test_health_cache_prevents_double_invocation(test_router: APIRouter) -
     a = create_app(
         make_settings(**_BASE),
         test_router,
-        health_checks=[counted],
-        health_cache_ttl=10.0,
+        health=HealthConfig(checks=[counted], cache_ttl=10.0),
     )
     async with live_client(a) as client:
         await client.get("/api/health/")
@@ -220,7 +224,9 @@ async def test_startup_validator_fail_prevents_ready(test_router: APIRouter) -> 
         raise RuntimeError("DB not reachable")
 
     a = create_app(
-        make_settings(**_BASE), test_router, startup_validators=[failing_validator]
+        make_settings(**_BASE),
+        test_router,
+        lifecycle=AppLifecycle(startup_validators=[failing_validator]),
     )
     with pytest.raises(RuntimeError, match="DB not reachable"):
         async with a.router.lifespan_context(a):
@@ -236,7 +242,11 @@ async def test_lifespan_calls_auth_deps_close(test_router: APIRouter) -> None:
     """Lifespan exit calls auth_deps.close() exactly once."""
     mock_auth = MagicMock()
     mock_auth.close = AsyncMock()
-    a = create_app(make_settings(**_BASE), test_router, auth_deps=mock_auth)
+    a = create_app(
+        make_settings(**_BASE),
+        test_router,
+        lifecycle=AppLifecycle(auth_deps=mock_auth),
+    )
     async with a.router.lifespan_context(a):
         pass
     mock_auth.close.assert_awaited_once()
@@ -246,7 +256,11 @@ async def test_lifespan_calls_auth_deps_close(test_router: APIRouter) -> None:
 async def test_lifespan_disposes_engine(test_router: APIRouter) -> None:
     """Lifespan exit calls db_engine.dispose() exactly once."""
     mock_engine = MagicMock()
-    a = create_app(make_settings(**_BASE), test_router, db_engine=mock_engine)
+    a = create_app(
+        make_settings(**_BASE),
+        test_router,
+        lifecycle=AppLifecycle(db_engine=mock_engine),
+    )
     async with a.router.lifespan_context(a):
         pass
     mock_engine.dispose.assert_called_once()
@@ -265,7 +279,11 @@ async def test_lifespan_extras_ready_after_extras_enter(test_router: APIRouter) 
         ready_at_entry.append(application.state.service_ready)
         yield
 
-    a = create_app(make_settings(**_BASE), test_router, lifespan_extras=extras)
+    a = create_app(
+        make_settings(**_BASE),
+        test_router,
+        lifecycle=AppLifecycle(lifespan_extras=extras),
+    )
     async with a.router.lifespan_context(a):
         pass
     assert ready_at_entry == [False]

@@ -1,4 +1,5 @@
-"""Pre-start DB readiness probe.
+"""
+Pre-start DB readiness probe.
 
 Retries a trivial SELECT until the database is reachable.  Run before
 uvicorn to prevent the service from starting with a dead DB.
@@ -24,10 +25,14 @@ WAIT_SECONDS = 5
 
 
 def _wait_for_db(engine: object) -> None:
-    """Retry a SELECT until the database is awake.
+    """
+    Retry a SELECT until the database is awake.
 
-    Args:
-        engine: A SQLAlchemy/SQLModel engine instance.
+    Parameters
+    ----------
+    engine
+        A SQLAlchemy/SQLModel engine instance.
+
     """
     try:
         from sqlalchemy import Engine  # noqa: PLC0415

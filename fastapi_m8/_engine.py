@@ -1,4 +1,5 @@
-"""DbEngine — public database engine wrapper for fastapi-m8 services.
+"""
+DbEngine — public database engine wrapper for fastapi-m8 services.
 
 Build via ``create_db_engine(settings)`` once at module load (``core/deps.py``).
 ``sqlmodel`` is imported lazily so the base install (no ``[db]`` extra) still
@@ -18,7 +19,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class DbEngine:
-    """Public wrapper around a SQLAlchemy/SQLModel engine.
+    """
+    Public wrapper around a SQLAlchemy/SQLModel engine.
 
     Build via ``create_db_engine()``; never construct directly.
     Use ``engine.session()`` in workers/scripts and ``engine.session_dep``
@@ -43,7 +45,7 @@ class DbEngine:
             yield s
 
     def session_dep(self) -> Generator[Any, None, None]:
-        """FastAPI dependency yielding a session.
+        """Yield a database session as a FastAPI dependency.
 
         Usage::
 
@@ -58,14 +60,20 @@ class DbEngine:
 
 
 def create_db_engine(settings: ConsumerServiceSettings) -> DbEngine:
-    """Create a synchronous DB engine from service settings.
+    """
+    Create a synchronous DB engine from service settings.
 
-    Args:
-        settings: A ``ConsumerServiceSettings`` instance with a valid
-            ``SQLALCHEMY_DATABASE_URI``.
+    Parameters
+    ----------
+    settings
+        A ``ConsumerServiceSettings`` instance with a valid
+        ``SQLALCHEMY_DATABASE_URI``.
 
-    Returns:
+    Returns
+    -------
+    DbEngine
         A ``DbEngine`` wrapping the underlying SQLAlchemy engine.
+
     """
     from sqlmodel import create_engine  # lazy import
 

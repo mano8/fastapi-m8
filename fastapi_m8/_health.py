@@ -1,4 +1,5 @@
-"""Health-check subsystem for fastapi-m8.
+"""
+Health-check subsystem for fastapi-m8.
 
 This module is intentionally **stateless**: readiness state lives on
 ``app.state`` (set by ``create_app``'s lifespan), so multiple FastAPI apps
@@ -64,7 +65,8 @@ class HealthStatus(StrEnum):
 
 
 class HealthAggregatePolicy(StrEnum):
-    """Policy for mapping individual check statuses to an HTTP status code.
+    """
+    Policy for mapping individual check statuses to an HTTP status code.
 
     STRICT: FAIL or UNKNOWN → 503.
     LENIENT: only FAIL → 503 (UNKNOWN/DEGRADED stay at 200).
@@ -84,7 +86,8 @@ class HealthCheck(Protocol):
 
 
 class HealthCheckResult(BaseModel):
-    """Result of a single health check.
+    """
+    Result of a single health check.
 
     ``error`` and sensitive ``meta`` keys are scrubbed at serialisation time
     via Pydantic field_serializers — DSNs with embedded credentials are masked.
@@ -136,7 +139,8 @@ async def run_check(
     check: HealthCheck,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> HealthCheckResult:
-    """Execute a single health check with a timeout.
+    """
+    Execute a single health check with a timeout.
 
     Never raises; timeout and exceptions are captured as FAIL results.
     Works with both asyncio and trio backends via anyio.

@@ -1,4 +1,5 @@
-"""fastapi-m8 — FastAPI application framework for m8 consumer microservices.
+"""
+fastapi-m8 — FastAPI application framework for m8 consumer microservices.
 
 Public surface (stable):
 
@@ -21,7 +22,7 @@ Tier 3 — informational / future::
 """
 
 # Tier 1
-from fastapi_m8._app import create_app
+from fastapi_m8._app import AppLifecycle, HealthConfig, create_app
 
 # Tier 3
 from fastapi_m8._async_stub import CAPABILITIES, capabilities, create_async_app
@@ -43,6 +44,8 @@ __all__ = [
     "__version__",
     # Tier 1
     "create_app",
+    "HealthConfig",
+    "AppLifecycle",
     "build_auth_deps",
     "AuthDeps",
     "create_db_engine",

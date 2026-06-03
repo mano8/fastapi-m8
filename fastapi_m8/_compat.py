@@ -1,4 +1,5 @@
-"""Runtime compatibility guard between fastapi-m8 and auth-sdk-m8.
+"""
+Runtime compatibility guard between fastapi-m8 and auth-sdk-m8.
 
 ``_assert_compat()`` is called from ``create_app()`` and ``build_auth_deps()``
 once per process (thread-safe via ``_lock``).
@@ -26,10 +27,14 @@ _COMPAT_STATE: dict[str, object] = {"checked": False, "auth_version": None}
 
 
 def _assert_compat() -> None:
-    """Check installed dependency versions against COMPAT_MATRIX.
+    """
+    Check installed dependency versions against COMPAT_MATRIX.
 
-    Raises:
-        RuntimeError: If a required dependency is outside its specified range.
+    Raises
+    ------
+    RuntimeError
+        If a required dependency is outside its specified range.
+
     """
     with _lock:
         if _COMPAT_STATE["checked"]:

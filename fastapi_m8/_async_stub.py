@@ -14,7 +14,8 @@ CAPABILITIES: dict[str, bool] = {
 
 
 def capabilities() -> dict[str, bool]:
-    """Return a copy of the capability flags.
+    """
+    Return a copy of the capability flags.
 
     Use this to introspect what the installed version supports before
     calling optional APIs.
@@ -23,10 +24,14 @@ def capabilities() -> dict[str, bool]:
 
 
 def create_async_app(*args: Any, **kwargs: Any) -> Any:
-    """Placeholder — async app support is planned for fastapi-m8 v2.0.0.
+    """
+    Placeholder — async app support is planned for fastapi-m8 v2.0.0.
 
-    Raises:
-        NotImplementedError: Always. Check ``capabilities()['async']`` first.
+    Raises
+    ------
+    NotImplementedError
+        Always. Check ``capabilities()['async']`` first.
+
     """
     raise NotImplementedError(
         "Async app support is planned for fastapi-m8 v2.0.0. "

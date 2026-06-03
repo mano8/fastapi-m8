@@ -61,6 +61,7 @@ health checks; the framework wires the rest.
 | Lifespan management | Auth teardown + DB pool dispose on shutdown |
 
 **What it is NOT:**
+
 - Not an auth issuer — that role belongs to `fa-auth-m8`.
 - Not a business logic framework — it only provides plumbing and dependency injection.
 
@@ -378,6 +379,7 @@ app = create_app(
 | `lifespan_extras` | Async context manager run inside the managed lifespan |
 
 **Lifespan sequence:**
+
 1. Run `startup_validators` — raise any exception to prevent ready signal.
 2. Enter `lifespan_extras` context (if provided).
 3. Set `app.state.service_ready = True`.
@@ -608,6 +610,7 @@ async def bootstrap(
 ```
 
 Unauthorized requests receive:
+
 - `401 Unauthorized` — missing or invalid token
 - `403 Forbidden` — valid token but insufficient role
 

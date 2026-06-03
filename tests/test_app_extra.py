@@ -9,7 +9,7 @@ from asgi_lifespan import LifespanManager
 from fastapi import APIRouter
 from httpx import ASGITransport, AsyncClient
 
-from fastapi_m8 import create_app
+from fastapi_m8 import AppLifecycle, HealthConfig, create_app
 from tests.conftest import make_settings
 
 _BASE = {"SET_OPEN_API": False, "SET_DOCS": False, "SET_REDOC": False}
@@ -25,7 +25,11 @@ def _router() -> APIRouter:
 def test_configure_callback_called_with_app() -> None:
     """configure(app) is called once with the fully-wired FastAPI app."""
     received: list = []
-    create_app(make_settings(**_BASE), _router(), configure=received.append)
+    create_app(
+        make_settings(**_BASE),
+        _router(),
+        lifecycle=AppLifecycle(configure=received.append),
+    )
     assert len(received) == 1
 
 
@@ -69,7 +73,9 @@ async def test_async_health_detail_authorizer_is_awaited() -> None:
         return True
 
     s = make_settings(**_BASE)
-    app = create_app(s, _router(), health_detail_authorizer=always_authorized)
+    app = create_app(
+        s, _router(), health=HealthConfig(detail_authorizer=always_authorized)
+    )
     async with LifespanManager(app) as manager:
         async with AsyncClient(
             transport=ASGITransport(app=manager.app), base_url="http://test"
