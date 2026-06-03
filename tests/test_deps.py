@@ -233,3 +233,13 @@ def test_get_current_active_superuser_raises_for_non_superuser_flag() -> None:
             _make_user(RoleType.SUPERADMIN, is_superuser=False)
         )
     assert exc_info.value.status_code == 403
+
+
+def test_get_current_active_superuser_raises_for_superuser_flag_with_insufficient_role() -> (
+    None
+):
+    """is_superuser=True but ADMIN role fails the SUPERADMIN role check."""
+    auth = build_auth_deps(make_settings())
+    with pytest.raises(HTTPException) as exc_info:
+        auth.get_current_active_superuser(_make_user(RoleType.ADMIN, is_superuser=True))
+    assert exc_info.value.status_code == 403

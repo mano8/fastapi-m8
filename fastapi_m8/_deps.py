@@ -27,6 +27,55 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
+_FORBIDDEN = status.HTTP_403_FORBIDDEN
+_UNAVAILABLE = status.HTTP_503_SERVICE_UNAVAILABLE
+_NO_PRIVILEGES = "The user doesn't have enough privileges"
+
+
+def _validate_access_token(validator: Any, token: str) -> Any:
+    try:
+        return validator.validate_access_token(token)
+    except InvalidToken as ex:
+        raise HTTPException(
+            status_code=_FORBIDDEN,
+            detail="Could not validate credentials.",
+        ) from ex
+
+
+async def _check_token_revocation(
+    revocation_client: RemoteRevocationClient | None, jti: str
+) -> None:
+    if revocation_client is None:
+        return
+    try:
+        if await revocation_client.is_revoked(jti):
+            raise HTTPException(
+                status_code=_FORBIDDEN,
+                detail="Token has been revoked.",
+            )
+    except RevocationCheckError as ex:
+        raise HTTPException(
+            status_code=_UNAVAILABLE,
+            detail="Token revocation check unavailable.",
+        ) from ex
+
+
+def _build_active_user(payload: Any) -> UserModel:
+    payload_dict = payload.model_dump(exclude={"exp", "jti", "type", "sub"})
+    payload_dict["id"] = payload.sub
+    user = UserModel(**payload_dict)
+    if not user.is_active:
+        raise HTTPException(status_code=_FORBIDDEN, detail="Inactive user")
+    return user
+
+
+def _require_role(current_user: UserModel, role_limit: RoleType) -> None:
+    if not RoleType.is_valid_role_auth(
+        current_role=current_user.role,
+        role_limit=role_limit,
+    ):
+        raise HTTPException(status_code=_FORBIDDEN, detail=_NO_PRIVILEGES)
+
 
 class _LoggingHooks:
     """Emit structured log lines for every token validation outcome."""
@@ -93,64 +142,24 @@ def build_auth_deps(settings: ConsumerServiceSettings) -> AuthDeps:
 
     async def get_current_user(token: TokenDep) -> UserModel:
         """Extract and validate the current user from the JWT access token."""
-        try:
-            payload = validator.validate_access_token(token)
-        except InvalidToken as ex:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Could not validate credentials.",
-            ) from ex
-
-        if revocation_client is not None:
-            try:
-                if await revocation_client.is_revoked(payload.jti):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Token has been revoked.",
-                    )
-            except RevocationCheckError as ex:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Token revocation check unavailable.",
-                ) from ex
-
-        payload_dict = payload.model_dump(exclude={"exp", "jti", "type", "sub"})
-        payload_dict["id"] = payload.sub
-        user = UserModel(**payload_dict)
-
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Inactive user",
-            )
-        return user
+        payload = _validate_access_token(validator, token)
+        await _check_token_revocation(revocation_client, payload.jti)
+        return _build_active_user(payload)
 
     CurrentUser = Annotated[UserModel, Depends(get_current_user)]
 
     def get_current_active_admin(current_user: CurrentUser) -> UserModel:  # type: ignore[valid-type]
         """Verify at least ADMIN role."""
-        if not RoleType.is_valid_role_auth(
-            current_role=current_user.role,
-            role_limit=RoleType.ADMIN,
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="The user doesn't have enough privileges",
-            )
+        _require_role(current_user, RoleType.ADMIN)
         return current_user
 
     def get_current_active_superuser(
         current_user: CurrentUser,  # type: ignore[valid-type]
     ) -> UserModel:
         """Verify SUPERADMIN role."""
-        if not current_user.is_superuser or not RoleType.is_valid_role_auth(
-            current_role=current_user.role,
-            role_limit=RoleType.SUPERADMIN,
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="The user doesn't have enough privileges",
-            )
+        if not current_user.is_superuser:
+            raise HTTPException(status_code=_FORBIDDEN, detail=_NO_PRIVILEGES)
+        _require_role(current_user, RoleType.SUPERADMIN)
         return current_user
 
     return AuthDeps(
