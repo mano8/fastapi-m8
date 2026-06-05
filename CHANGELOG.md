@@ -9,6 +9,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.1.3] — 2026-06-05 · Shell script permissions
+
+### Fixed
+
+- **`fastapi_m8/scripts/docker_start.sh` was stored as `100644`** in git.
+  On hosts with `core.filemode=false` (WSL2, Windows, some CI runners) the missing
+  execute bit caused `Permission denied` when the script was invoked directly from a
+  bind-mounted Docker volume. Fixed via `git update-index --chmod=+x`.
+
+---
+
 ## [1.1.2] — 2026-06-03 · Metrics initialisation + tagless-route fix
 
 ### Fixed
