@@ -235,7 +235,9 @@ def _openapi_config(
         ),
         "docs_url": f"{settings.API_PREFIX}/docs" if settings.SET_DOCS else None,
         "redoc_url": f"{settings.API_PREFIX}/redoc" if settings.SET_REDOC else None,
-        "generate_unique_id_function": lambda r: f"{r.tags[0] if r.tags else r.name}-{r.name}",
+        "generate_unique_id_function": lambda r: (
+            f"{r.tags[0] if r.tags else r.name}-{r.name}"
+        ),
     }
 
 
