@@ -9,6 +9,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.1.2] — 2026-06-03 · Metrics initialisation + tagless-route fix
+
+### Fixed
+
+- **`_add_metrics_middleware` now calls `auth_sdk_m8.observability.metrics.setup()`** before
+  adding `MetricsMiddleware`. Previously the middleware was registered but `_m` stayed `None`,
+  so every request was a no-op and `/metrics` always returned empty output.
+- **`generate_unique_id_function` no longer raises `IndexError`** on routes with an empty
+  `tags` list (e.g. `include_in_schema=False` utility endpoints). The route name is used as
+  the unique-id prefix when no tags are present.
+
+---
+
 ## [1.1.0] — 2026-06-03 · Secure-by-default revocation + API cleanup
 
 ### Security

@@ -36,13 +36,28 @@ def test_configure_callback_called_with_app() -> None:
 # ── METRICS_ENABLED with ImportError ─────────────────────────────────────────
 
 
-def test_metrics_enabled_adds_middleware_when_available() -> None:
-    """METRICS_ENABLED=True with observability installed adds MetricsMiddleware."""
+def test_metrics_enabled_calls_setup_then_adds_middleware() -> None:
+    """METRICS_ENABLED=True calls setup() with settings values, then adds MetricsMiddleware."""
     s = make_settings(**_BASE, METRICS_ENABLED=True)
-    with patch("auth_sdk_m8.observability.middleware.MetricsMiddleware") as mock_mw:
+    with (
+        patch("auth_sdk_m8.observability.metrics.setup") as mock_setup,
+        patch("auth_sdk_m8.observability.middleware.MetricsMiddleware"),
+    ):
         app = create_app(s, _router())
     assert app is not None
-    _ = mock_mw  # referenced to satisfy linter
+    mock_setup.assert_called_once_with(
+        enabled=True,
+        groups_str=s.METRICS_GROUPS,
+        api_prefix=s.API_PREFIX,
+    )
+
+
+def test_tagless_route_uses_name_as_unique_id_fallback() -> None:
+    """Routes with no tags must not raise IndexError — name is used as fallback."""
+    router = APIRouter()
+    router.add_api_route("/probe", lambda: "ok", methods=["GET"], name="probe")
+    app = create_app(make_settings(**_BASE), router)
+    assert app is not None
 
 
 # ── health before lifespan ────────────────────────────────────────────────────
