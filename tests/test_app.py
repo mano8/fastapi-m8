@@ -300,3 +300,26 @@ async def test_included_router_reachable(test_app) -> None:
         resp = await client.get("/hello")
     assert resp.status_code == 200
     assert resp.json() == {"hello": "world"}
+
+
+# ── Production docs gating (F5) ───────────────────────────────────────────────
+
+
+def test_production_env_gates_all_doc_urls(test_router: APIRouter) -> None:
+    """ENVIRONMENT=production + SET_*=True → all three doc URLs are None (gated off)."""
+    s = make_settings(
+        ENVIRONMENT="production", SET_OPEN_API=True, SET_DOCS=True, SET_REDOC=True
+    )
+    app = create_app(s, test_router)
+    assert app.openapi_url is None
+    assert app.docs_url is None
+    assert app.redoc_url is None
+
+
+def test_non_production_env_respects_set_flags(test_router: APIRouter) -> None:
+    """Non-production: effective URLs follow SET_* flags unchanged."""
+    s = make_settings(**_BASE)  # _BASE already has SET_OPEN_API=False etc.
+    app = create_app(s, test_router)
+    assert app.openapi_url is None
+    assert app.docs_url is None
+    assert app.redoc_url is None
