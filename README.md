@@ -231,6 +231,13 @@ REFRESH_SECRET_KEY=change-me-refresh-32-chars-min
 TOKEN_MODE=stateless
 AUTH_SERVICE_ROLE=consumer
 
+# Host validation — set in production to prevent host-header injection
+# ALLOWED_HOSTS=api.example.com
+
+# Docs gating — docs are auto-disabled in production (ENVIRONMENT=production)
+# unless SERVE_DOCS_IN_PRODUCTION=true (opt-in for public APIs)
+# SERVE_DOCS_IN_PRODUCTION=false
+
 # Database
 DB_HOST=localhost
 DB_PORT=5432
@@ -326,11 +333,28 @@ do not connect to Redis directly.
 
 ### OpenAPI / Docs
 
-| Variable | Description |
-|---|---|
-| `SET_OPEN_API` | Expose `/openapi.json` |
-| `SET_DOCS` | Expose Swagger UI |
-| `SET_REDOC` | Expose ReDoc |
+| Variable | Default | Description |
+|---|---|---|
+| `SET_OPEN_API` | `true` | Expose `/openapi.json` (gated off in production unless `SERVE_DOCS_IN_PRODUCTION=true`) |
+| `SET_DOCS` | `true` | Expose Swagger UI (gated off in production unless `SERVE_DOCS_IN_PRODUCTION=true`) |
+| `SET_REDOC` | `true` | Expose ReDoc (gated off in production unless `SERVE_DOCS_IN_PRODUCTION=true`) |
+| `SERVE_DOCS_IN_PRODUCTION` | `false` | Set `true` to explicitly re-enable docs in production (e.g. public/open-source APIs). Requires `auth-sdk-m8>=0.7.3`. |
+
+> **Production docs gating (secure-by-default):** when `ENVIRONMENT=production` (or
+> `STRICT_PRODUCTION_MODE=true`), all three doc endpoints are disabled regardless of the
+> `SET_*` flags, unless `SERVE_DOCS_IN_PRODUCTION=true` is set. Non-production environments
+> are unaffected.
+
+### Security / Host Validation
+
+| Variable | Default | Description |
+|---|---|---|
+| `ALLOWED_HOSTS` | `` (empty) | Comma-separated list of allowed `Host` headers, e.g. `api.example.com,localhost`. Empty = no restriction (permissive, suitable for dev). Set in production to prevent host-header injection. |
+
+> **TrustedHostMiddleware:** when `ALLOWED_HOSTS` is non-empty, `fastapi-m8` registers
+> Starlette's `TrustedHostMiddleware`. Requests with a `Host` header not in the list
+> are rejected with HTTP 400. `testserver` is automatically added in non-production so
+> pytest's `TestClient` works without extra configuration.
 
 ---
 
@@ -898,7 +922,8 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
-| `1.1.x` | `>=0.7.1, <0.8.0` | 3.11, 3.12, 3.13 |
+| `1.1.4` | `>=0.7.3, <0.8.0` | 3.11, 3.12, 3.13 |
+| `1.1.0–1.1.3` | `>=0.7.1, <0.8.0` | 3.11, 3.12, 3.13 |
 | `1.0.x` | `>=0.7.0, <0.8.0` | 3.11, 3.12, 3.13 |
 
 The compatibility matrix is enforced at startup via `COMPAT_MATRIX`. A

@@ -9,6 +9,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.1.4] — 2026-06-06 · Security hardening (fail-closed default, TrustedHostMiddleware, production docs gating)
+
+### Security
+
+- **`RemoteRevocationClient` now defaults to `fail_closed=True`** (F6).
+  Previously the client was constructed with `fail_closed=False` regardless of the stack's
+  configured posture, silently allowing revoked tokens through on network errors.
+  Stacks that prefer availability over security can opt out with
+  `ACCESS_REVOCATION_FAILURE_MODE=fail_open`.
+- **`TrustedHostMiddleware` registered when `ALLOWED_HOSTS` is set** (F8).
+  Requests whose `Host` header is not in the allowlist are rejected with HTTP 400.
+  `testserver` is automatically allowed in non-production environments so tests continue
+  to work without extra configuration. Leave `ALLOWED_HOSTS` empty (the default) for
+  local/dev permissive mode.
+- **Production docs gating via `effective_set_*` properties** (F5).
+  `openapi_url`, `docs_url`, and `redoc_url` now use `settings.effective_set_open_api` /
+  `effective_set_docs` / `effective_set_redoc` (from `auth-sdk-m8 ≥ 0.7.3`), which
+  automatically disable all three doc endpoints when `ENVIRONMENT=production` and
+  `SERVE_DOCS_IN_PRODUCTION` is not set. Non-production behaviour is unchanged.
+
+### Changed
+
+- **`auth-sdk-m8` pin updated to `>=0.7.3`** — required for the `effective_set_*`
+  computed properties and `SERVE_DOCS_IN_PRODUCTION` opt-in.
+- **`_version.py` aligned with `pyproject.toml`** — was incorrectly left at `1.1.2` after
+  the 1.1.3 shell-script-permissions patch; now both reflect `1.1.4`.
+
+---
+
 ## [1.1.3] — 2026-06-05 · Shell script permissions
 
 ### Fixed
