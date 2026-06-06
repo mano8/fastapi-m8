@@ -20,9 +20,8 @@ class RemoteRevocationClient:
     """
     Async HTTP client for JTI revocation checks.
 
-    Fail-open by default: an unreachable auth service treats the token as
-    active.  Set ``fail_closed=True`` to reject tokens when the endpoint is
-    unavailable.
+    Fail-closed by default: an unreachable auth service rejects the token.
+    Set ``fail_closed=False`` to accept tokens when the endpoint is unavailable.
     """
 
     def __init__(
@@ -32,7 +31,7 @@ class RemoteRevocationClient:
         private_api_secret: str,
         connect_timeout: float = 2.0,
         read_timeout: float = 3.0,
-        fail_closed: bool = False,
+        fail_closed: bool = True,
     ) -> None:
         """Initialise the HTTP client with auth headers and timeouts."""
         self._url = introspection_url
@@ -51,8 +50,8 @@ class RemoteRevocationClient:
         """
         Return True when the JTI has been revoked.
 
-        On network/HTTP error: returns False (fail-open) unless
-        ``fail_closed=True``, in which case ``RevocationCheckError`` is raised.
+        On network/HTTP error: raises ``RevocationCheckError`` (fail-closed) unless
+        ``fail_closed=False``, in which case returns False (fail-open).
         """
         try:
             response = await self._client.post(self._url, json={"jti": jti})

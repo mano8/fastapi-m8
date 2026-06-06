@@ -47,11 +47,22 @@ async def test_is_revoked_returns_false_when_active() -> None:
 
 @pytest.mark.anyio
 async def test_is_revoked_fail_open_on_network_error() -> None:
-    """Network error with fail_closed=False (default) → returns False."""
-    client = _make_client()
+    """Network error with fail_closed=False (opt-in) → returns False."""
+    client = _make_client(fail_closed=False)
     client._client.post = AsyncMock(side_effect=httpx.ConnectError("unreachable"))
 
     assert await client.is_revoked("jti-999") is False
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_is_revoked_default_fail_closed_raises_on_error() -> None:
+    """Network error with default construction → raises RevocationCheckError."""
+    client = _make_client()
+    client._client.post = AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+
+    with pytest.raises(RevocationCheckError):
+        await client.is_revoked("jti-999")
     await client.close()
 
 
