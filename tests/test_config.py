@@ -43,3 +43,15 @@ def test_consumer_service_settings_mro() -> None:
     assert hasattr(s, "INTROSPECTION_URL")  # ConsumerAuthMixin
     assert hasattr(s, "is_stateful")  # CommonSettings
     assert hasattr(s, "SQLALCHEMY_DATABASE_URI")  # CommonSettings
+
+
+def test_allowed_hosts_parsed_from_string() -> None:
+    """ALLOWED_HOSTS accepts a comma-separated string (env-var form)."""
+    s = make_settings(ALLOWED_HOSTS="api.example.com, localhost")
+    assert s.ALLOWED_HOSTS == ["api.example.com", "localhost"]
+
+
+def test_allowed_hosts_empty_by_default() -> None:
+    """ALLOWED_HOSTS defaults to an empty list (middleware not registered)."""
+    s = make_settings()
+    assert s.ALLOWED_HOSTS == []

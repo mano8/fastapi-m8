@@ -103,9 +103,10 @@ async def test_auth_deps_close_calls_client_close() -> None:
     )
     auth = build_auth_deps(s)
     assert auth.revocation_client is not None
-    auth.revocation_client._client.aclose = AsyncMock()
+    mock_aclose = AsyncMock()
+    setattr(auth.revocation_client._client, "aclose", mock_aclose)
     await auth.close()
-    auth.revocation_client._client.aclose.assert_awaited_once()
+    mock_aclose.assert_awaited_once()
 
 
 # ── get_current_user ──────────────────────────────────────────────────────────

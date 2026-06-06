@@ -22,6 +22,7 @@ Example::
 from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
+from pydantic import field_validator
 
 
 class ConsumerServiceSettings(
@@ -39,3 +40,15 @@ class ConsumerServiceSettings(
 
     AUTH_PREFIX: str = "/auth"
     TABLES_PREFIX: str = "app"
+    # Explicit host allowlist for TrustedHostMiddleware.
+    # Empty (default) = middleware not registered (permissive, safe for dev).
+    # In production set to your public hostname(s), e.g. "api.example.com".
+    ALLOWED_HOSTS: list[str] = []
+
+    @field_validator("ALLOWED_HOSTS", mode="before")
+    @classmethod
+    def _parse_allowed_hosts(cls, v: object) -> list[str]:
+        """Accept a comma-separated string or list from the environment."""
+        if isinstance(v, str):
+            return [h.strip() for h in v.split(",") if h.strip()]
+        return list(v) if v else []  # type: ignore[call-overload]
