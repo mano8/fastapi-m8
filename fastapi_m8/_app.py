@@ -20,6 +20,7 @@ import anyio
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from fastapi_m8._compat import _COMPAT_STATE, _assert_compat
 from fastapi_m8._health import (
@@ -231,10 +232,16 @@ def _openapi_config(
         "title": service_name or settings.PROJECT_NAME,
         "version": service_version or "0.0.0",
         "openapi_url": (
-            f"{settings.API_PREFIX}/openapi.json" if settings.SET_OPEN_API else None
+            f"{settings.API_PREFIX}/openapi.json"
+            if settings.effective_set_open_api
+            else None
         ),
-        "docs_url": f"{settings.API_PREFIX}/docs" if settings.SET_DOCS else None,
-        "redoc_url": f"{settings.API_PREFIX}/redoc" if settings.SET_REDOC else None,
+        "docs_url": (
+            f"{settings.API_PREFIX}/docs" if settings.effective_set_docs else None
+        ),
+        "redoc_url": (
+            f"{settings.API_PREFIX}/redoc" if settings.effective_set_redoc else None
+        ),
         "generate_unique_id_function": lambda r: (
             f"{r.tags[0] if r.tags else r.name}-{r.name}"
         ),
@@ -256,6 +263,20 @@ def _add_cors_middleware(app: FastAPI, settings: ConsumerServiceSettings) -> Non
         allow_headers=_CORS_HEADERS,
         max_age=3600,
     )
+
+
+def _add_trusted_host_middleware(
+    app: FastAPI, settings: ConsumerServiceSettings
+) -> None:
+    if not settings.ALLOWED_HOSTS:
+        return
+    hosts = list(settings.ALLOWED_HOSTS)
+    is_production = (
+        settings.ENVIRONMENT == "production" or settings.STRICT_PRODUCTION_MODE
+    )
+    if not is_production and "testserver" not in hosts:
+        hosts = [*hosts, "testserver"]
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
 
 def _register_health_route(
@@ -334,6 +355,7 @@ def create_app(
     )
     _init_app_state(app)
     _add_cors_middleware(app, settings)
+    _add_trusted_host_middleware(app, settings)
     _add_metrics_middleware(app, settings)
     authorize = h.detail_authorizer or _build_default_authorizer(settings)
     _register_health_route(

@@ -8,6 +8,7 @@ import pytest
 from asgi_lifespan import LifespanManager
 from fastapi import APIRouter
 from httpx import ASGITransport, AsyncClient
+from fastapi.testclient import TestClient
 
 from fastapi_m8 import AppLifecycle, HealthConfig, create_app
 from tests.conftest import make_settings
@@ -97,3 +98,33 @@ async def test_async_health_detail_authorizer_is_awaited() -> None:
         ) as client:
             resp = await client.get("/api/health/")
     assert "checks" in resp.json()
+
+
+# ── TrustedHostMiddleware (F8) ────────────────────────────────────────────────
+
+
+def test_trusted_host_disallowed_returns_400() -> None:
+    """A Host header not in ALLOWED_HOSTS is rejected with 400."""
+    s = make_settings(**_BASE, ALLOWED_HOSTS=["example.com"])
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/", headers={"Host": "badhost.com"})
+    assert resp.status_code == 400
+
+
+def test_trusted_host_testserver_allowed_in_non_prod() -> None:
+    """testserver is auto-added in non-production so TestClient works."""
+    s = make_settings(**_BASE, ALLOWED_HOSTS=["example.com"])
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/")
+    assert resp.status_code != 400
+
+
+def test_trusted_host_middleware_not_registered_when_empty() -> None:
+    """No ALLOWED_HOSTS → middleware not registered; all hosts pass."""
+    s = make_settings(**_BASE)
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/", headers={"Host": "any-host.example"})
+    assert resp.status_code != 400
