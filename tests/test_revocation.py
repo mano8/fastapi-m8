@@ -26,7 +26,7 @@ async def test_is_revoked_returns_true_when_not_active() -> None:
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {"active": False}
-    client._client.post = AsyncMock(return_value=mock_resp)
+    setattr(client._client, "post", AsyncMock(return_value=mock_resp))
 
     assert await client.is_revoked("jti-123") is True
     await client.close()
@@ -39,7 +39,7 @@ async def test_is_revoked_returns_false_when_active() -> None:
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {"active": True}
-    client._client.post = AsyncMock(return_value=mock_resp)
+    setattr(client._client, "post", AsyncMock(return_value=mock_resp))
 
     assert await client.is_revoked("jti-123") is False
     await client.close()
@@ -49,7 +49,9 @@ async def test_is_revoked_returns_false_when_active() -> None:
 async def test_is_revoked_fail_open_on_network_error() -> None:
     """Network error with fail_closed=False (opt-in) → returns False."""
     client = _make_client(fail_closed=False)
-    client._client.post = AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+    setattr(
+        client._client, "post", AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+    )
 
     assert await client.is_revoked("jti-999") is False
     await client.close()
@@ -59,7 +61,9 @@ async def test_is_revoked_fail_open_on_network_error() -> None:
 async def test_is_revoked_default_fail_closed_raises_on_error() -> None:
     """Network error with default construction → raises RevocationCheckError."""
     client = _make_client()
-    client._client.post = AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+    setattr(
+        client._client, "post", AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+    )
 
     with pytest.raises(RevocationCheckError):
         await client.is_revoked("jti-999")
@@ -70,7 +74,9 @@ async def test_is_revoked_default_fail_closed_raises_on_error() -> None:
 async def test_is_revoked_fail_closed_raises_on_error() -> None:
     """Network error with fail_closed=True → raises RevocationCheckError."""
     client = _make_client(fail_closed=True)
-    client._client.post = AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+    setattr(
+        client._client, "post", AsyncMock(side_effect=httpx.ConnectError("unreachable"))
+    )
 
     with pytest.raises(RevocationCheckError):
         await client.is_revoked("jti-999")
@@ -81,6 +87,7 @@ async def test_is_revoked_fail_closed_raises_on_error() -> None:
 async def test_close_calls_aclose() -> None:
     """close() delegates to the httpx session."""
     client = _make_client()
-    client._client.aclose = AsyncMock()
+    mock_aclose = AsyncMock()
+    setattr(client._client, "aclose", mock_aclose)
     await client.close()
-    client._client.aclose.assert_awaited_once()
+    mock_aclose.assert_awaited_once()
