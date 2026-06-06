@@ -3,42 +3,21 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
-from typing import Any
 from unittest.mock import AsyncMock
 
-import jwt
 import pytest
 from auth_sdk_m8.schemas.base import RoleType
 from auth_sdk_m8.schemas.user import UserModel
+from auth_sdk_m8.security.jwks_resolver import JwksKeyResolver
 from fastapi import HTTPException
 
 from fastapi_m8._deps import _LoggingHooks, build_auth_deps
 from fastapi_m8._revocation import RevocationCheckError
-from tests.conftest import VALID_KEY, make_settings
+from tests.conftest import jwks_document, make_access_token, make_settings
 
 pytestmark = pytest.mark.anyio
 
 _VALID_UUID = "550e8400-e29b-41d4-a716-446655440000"
-
-# ── token helpers ─────────────────────────────────────────────────────────────
-
-
-def _access_token(**extra: Any) -> str:
-    now = datetime.now(UTC)
-    payload = {
-        "sub": _VALID_UUID,
-        "type": "access",
-        "email": "test@example.com",
-        "role": "user",
-        "jti": "jti-0001",
-        "exp": int((now + timedelta(hours=1)).timestamp()),
-        "is_active": True,
-        "email_verified": False,
-        "is_superuser": False,
-        **extra,
-    }
-    return jwt.encode(payload, VALID_KEY, algorithm="HS256")
 
 
 # ── _LoggingHooks ─────────────────────────────────────────────────────────────
@@ -114,10 +93,95 @@ async def test_auth_deps_close_calls_client_close() -> None:
 
 @pytest.mark.anyio
 async def test_get_current_user_valid_token() -> None:
-    """Valid token → returns UserModel."""
+    """Valid RS256 token bound to the configured iss/aud → returns UserModel."""
     auth = build_auth_deps(make_settings())
-    user = await auth.get_current_user(_access_token())
+    user = await auth.get_current_user(make_access_token())
     assert isinstance(user, UserModel)
+
+
+# ── secure-by-default: RS256 + strict iss/aud binding (F1/F2) ──────────────────
+
+
+def test_build_auth_deps_logs_validation_posture(caplog) -> None:
+    """The factory logs the inherited RS256 + strict validation posture."""
+    with caplog.at_level(logging.INFO, logger="fastapi_m8._deps"):
+        build_auth_deps(make_settings())
+    assert "auth.validation algorithm=RS256 strict=True" in caplog.text
+
+
+@pytest.mark.anyio
+async def test_get_current_user_wrong_audience_rejected() -> None:
+    """A token minted for a different audience is rejected out of the box."""
+    auth = build_auth_deps(make_settings())
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.get_current_user(make_access_token(audience="other-service"))
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_get_current_user_wrong_issuer_rejected() -> None:
+    """A token from an unexpected issuer is rejected out of the box."""
+    auth = build_auth_deps(make_settings())
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.get_current_user(make_access_token(issuer="https://evil.test"))
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.anyio
+async def test_hs256_token_rejected_under_rs256_default() -> None:
+    """An HS256-signed token is refused when the default posture is RS256."""
+    import jwt
+
+    from tests.conftest import TOKEN_AUDIENCE, TOKEN_ISSUER, VALID_KEY
+
+    auth = build_auth_deps(make_settings())
+    forged = jwt.encode(
+        {
+            "sub": _VALID_UUID,
+            "type": "access",
+            "jti": "j",
+            "exp": 9999999999,
+            "iat": 0,
+            "nbf": 0,
+            "iss": TOKEN_ISSUER,
+            "aud": TOKEN_AUDIENCE,
+            "email": "x@example.com",
+            "role": "user",
+        },
+        VALID_KEY,
+        algorithm="HS256",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.get_current_user(forged)
+    assert exc_info.value.status_code == 403
+
+
+# ── consumer-mode validation via JWKS (zero-downtime key rotation) ─────────────
+
+
+@pytest.mark.anyio
+async def test_get_current_user_via_jwks(monkeypatch) -> None:
+    """JWKS_URI wires a JwksKeyResolver that validates RS256 tokens by kid."""
+    monkeypatch.setattr(
+        JwksKeyResolver, "_fetch_jwks", lambda self: jwks_document()["keys"]
+    )
+    s = make_settings(JWKS_URI="https://auth.test/.well-known/jwks.json")
+    auth = build_auth_deps(s)
+    user = await auth.get_current_user(make_access_token())
+    assert isinstance(user, UserModel)
+
+
+@pytest.mark.anyio
+async def test_get_current_user_via_jwks_unknown_kid_rejected(monkeypatch) -> None:
+    """A token whose kid is absent from the JWKS document is rejected."""
+    monkeypatch.setattr(
+        JwksKeyResolver, "_fetch_jwks", lambda self: jwks_document()["keys"]
+    )
+    s = make_settings(JWKS_URI="https://auth.test/.well-known/jwks.json")
+    auth = build_auth_deps(s)
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.get_current_user(make_access_token(kid="rotated-away"))
+    assert exc_info.value.status_code == 403
 
 
 @pytest.mark.anyio
@@ -134,7 +198,7 @@ async def test_get_current_user_inactive_user_raises_403() -> None:
     """Token for inactive user → 403 HTTPException."""
     auth = build_auth_deps(make_settings())
     with pytest.raises(HTTPException) as exc_info:
-        await auth.get_current_user(_access_token(is_active=False))
+        await auth.get_current_user(make_access_token(is_active=False))
     assert exc_info.value.status_code == 403
     assert "Inactive" in exc_info.value.detail
 
@@ -152,7 +216,7 @@ async def test_get_current_user_revoked_token_raises_403() -> None:
     auth.revocation_client.is_revoked = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     with pytest.raises(HTTPException) as exc_info:
-        await auth.get_current_user(_access_token())
+        await auth.get_current_user(make_access_token())
     assert exc_info.value.status_code == 403
     assert "revoked" in exc_info.value.detail.lower()
 
@@ -172,7 +236,7 @@ async def test_get_current_user_revocation_error_raises_503() -> None:
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await auth.get_current_user(_access_token())
+        await auth.get_current_user(make_access_token())
     assert exc_info.value.status_code == 503
 
 
