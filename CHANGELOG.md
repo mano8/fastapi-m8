@@ -9,6 +9,46 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.2.0] — 2026-06-06 · Consume auth-sdk-m8 1.0.0 secure-by-default signing & binding (F1/F2)
+
+> **Requires `auth-sdk-m8 >= 1.0.0`.** That release is **breaking**: the default
+> access-token algorithm is now **RS256** (asymmetric / JWKS) and **strict `iss`/`aud`
+> binding** is enforced. Review the opt-outs below before upgrading.
+
+### Security
+
+- **Factory-built apps inherit secure-by-default token validation (F1/F2).**
+  `build_auth_deps()` passes the full settings object to `auth-sdk-m8`'s
+  `build_access_validator()`, which now reads `ACCESS_TOKEN_ALGORITHM`,
+  `TOKEN_ISSUER`/`TOKEN_AUDIENCE`, `TOKEN_STRICT_VALIDATION` and `JWKS_URI` directly.
+  A service built on `fastapi-m8` therefore validates **RS256** tokens — resolving keys
+  via **JWKS** when `JWKS_URI` is set — and **rejects wrong-`aud`/wrong-`iss` tokens out
+  of the box**, with no extra wiring.
+- **Effective validation posture is logged at build time** (`auth.validation algorithm=…
+  strict=… jwks=… iss=… aud=… role=…`), mirroring the existing `revocation.mode` log so
+  the inherited defaults are visible in startup logs.
+
+### Changed
+
+- **`auth-sdk-m8` pin updated to `>=1.0.0,<2.0.0`** and `COMPAT_MATRIX` gains a `1.2`
+  entry requiring the same range (enforced at startup via `_assert_compat()`).
+
+### Migration
+
+- **Strict binding is on by default.** Settings now **fail closed at boot** unless both
+  `TOKEN_ISSUER` and `TOKEN_AUDIENCE` are set. Single-service/dev deployments that do not
+  need cross-service token boundaries can opt out with `TOKEN_STRICT_VALIDATION=false`.
+- **RS256 is the default algorithm.** Provide `ACCESS_PUBLIC_KEY_FILE` (or `JWKS_URI` for
+  zero-downtime rotation). Operators still on shared-secret signing must opt back in with
+  `ACCESS_TOKEN_ALGORITHM=HS256` and `ACCESS_SECRET_KEY`.
+- **Event-bus signing is on by default.** Inherited from `auth-sdk-m8 1.0.0`: settings
+  require `EVENT_SIGNING_KEY` at boot unless `EVENT_SIGNING_ENABLED=false`. See the
+  [auth-sdk-m8 1.0.0 migration guide](../auth-sdk-m8/CHANGELOG.md).
+- `.env.example` and the README configuration reference are aligned with the new defaults
+  and opt-outs.
+
+---
+
 ## [1.1.4] — 2026-06-06 · Security hardening (fail-closed default, TrustedHostMiddleware, production docs gating)
 
 ### Security

@@ -223,10 +223,23 @@ BACKEND_HOST=http://localhost:8000
 FRONTEND_HOST=http://localhost:3000
 BACKEND_CORS_ORIGINS=http://localhost:3000
 
-# Token signing — must match fa-auth-m8
-ACCESS_TOKEN_ALGORITHM=HS256
-ACCESS_SECRET_KEY=change-me-32-chars-minimum
+# Token signing — must match fa-auth-m8 (secure-by-default: RS256 + JWKS)
+# ACCESS_TOKEN_ALGORITHM defaults to RS256; supply the issuer's public key.
+ACCESS_PUBLIC_KEY_FILE=/opt/keys/access_public.pem
+# JWKS_URI=https://auth.example.com/.well-known/jwks.json   # zero-downtime rotation
 REFRESH_SECRET_KEY=change-me-refresh-32-chars-min
+
+# Strict iss/aud binding is ON by default — both are required at boot.
+TOKEN_ISSUER=https://auth.example.com
+TOKEN_AUDIENCE=item-service
+# Opt out for single-service/dev deployments (then HS256 + ACCESS_SECRET_KEY is enough):
+# TOKEN_STRICT_VALIDATION=false
+# ACCESS_TOKEN_ALGORITHM=HS256
+# ACCESS_SECRET_KEY=change-me-32-chars-minimum
+
+# Event-bus signing is ON by default (inherited from auth-sdk-m8>=1.0.0).
+EVENT_SIGNING_KEY=change-me-event-signing-32-chars
+# EVENT_SIGNING_ENABLED=false   # opt out only if you do not use the event bus
 
 TOKEN_MODE=stateless
 AUTH_SERVICE_ROLE=consumer
@@ -279,16 +292,27 @@ environment variable.
 |---|---|---|---|
 | `TOKEN_MODE` | No | `stateful` | `stateless` \| `hybrid` \| `stateful` (see [Token Modes](#token-modes)) |
 | `AUTH_SERVICE_ROLE` | No | `issuer` | Set to `consumer` in all consumer services |
-| `ACCESS_TOKEN_ALGORITHM` | No | `HS256` | `HS256` \| `RS256` \| `ES256` |
-| `ACCESS_SECRET_KEY` | HS256 only | — | Shared symmetric signing key (≥ 32 chars) |
-| `REFRESH_SECRET_KEY` | Yes | — | Refresh token signing key |
-| `ACCESS_PUBLIC_KEY_FILE` | RS256/ES256 | — | Path to PEM public key file |
-| `JWKS_URI` | RS256/ES256 alt | — | JWKS endpoint URL (auto-fetches and caches public keys) |
+| `ACCESS_TOKEN_ALGORITHM` | No | `RS256` | `RS256` (default, asymmetric/JWKS) \| `ES256` \| `HS256` (opt-in shared secret) |
+| `ACCESS_PUBLIC_KEY_FILE` | RS256/ES256 | — | Path to PEM public key file (consumer validation) |
+| `JWKS_URI` | RS256/ES256 alt | — | JWKS endpoint URL (auto-fetches and caches public keys; zero-downtime rotation) |
 | `JWKS_CACHE_TTL_SECONDS` | No | `300` | JWKS key cache TTL in seconds |
+| `ACCESS_SECRET_KEY` | HS256 only | — | Shared symmetric signing key (≥ 32 chars) — required only when opting into HS256 |
+| `REFRESH_SECRET_KEY` | Yes | — | Refresh token signing key (always HS256, internal) |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | No | `30` | Access token lifetime |
 | `REFRESH_TOKEN_EXPIRE_MINUTES` | No | `120` | Refresh token lifetime |
-| `TOKEN_ISSUER` | No | — | Embeds and enforces `iss` claim when set |
-| `TOKEN_AUDIENCE` | No | — | Embeds and enforces `aud` claim when set |
+| `TOKEN_STRICT_VALIDATION` | No | `true` | Secure-by-default: enforce `iss`/`aud` binding; **requires `TOKEN_ISSUER` + `TOKEN_AUDIENCE` at boot**. Set `false` for single-service/dev. |
+| `TOKEN_ISSUER` | Yes¹ | — | Expected `iss` claim. Required at boot under strict validation. |
+| `TOKEN_AUDIENCE` | Yes¹ | — | Expected `aud` claim (this service). Required at boot under strict validation. |
+| `EVENT_SIGNING_ENABLED` | No | `true` | Secure-by-default: HMAC-sign event-bus payloads. Set `false` to disable. |
+| `EVENT_SIGNING_KEY` | Yes² | — | Shared HMAC secret for the event bus. Required at boot unless `EVENT_SIGNING_ENABLED=false`. |
+
+¹ Required unless `TOKEN_STRICT_VALIDATION=false`. ² Required unless `EVENT_SIGNING_ENABLED=false`.
+
+> **Secure-by-default (auth-sdk-m8 ≥ 1.0.0):** access tokens default to **RS256** and
+> validation enforces **`iss`/`aud` binding**, so a factory-built app rejects
+> wrong-audience / wrong-issuer tokens out of the box. Operators who need shared-secret
+> signing opt back in with `ACCESS_TOKEN_ALGORITHM=HS256` + `ACCESS_SECRET_KEY`; those
+> without cross-service boundaries relax binding with `TOKEN_STRICT_VALIDATION=false`.
 
 ### Stateful Mode (consumer → auth service)
 
@@ -582,12 +606,13 @@ and `PRIVATE_API_SECRET` in consumer settings.
 
 | Algorithm | Key config | Use case |
 |---|---|---|
-| `HS256` | `ACCESS_SECRET_KEY` (symmetric, shared) | Simple single-service or trusted internal network |
-| `RS256` | `ACCESS_PUBLIC_KEY_FILE` or `JWKS_URI` | Multi-service; consumers need only the public key |
+| `RS256` *(default)* | `ACCESS_PUBLIC_KEY_FILE` or `JWKS_URI` | Multi-service; consumers need only the public key |
 | `ES256` | `ACCESS_PUBLIC_KEY_FILE` or `JWKS_URI` | Same as RS256, smaller keys |
+| `HS256` *(opt-in)* | `ACCESS_SECRET_KEY` (symmetric, shared) | Simple single-service or trusted internal network |
 
-With `JWKS_URI` set, the consumer fetches and caches the public key automatically,
-refreshing on unknown `kid` headers.
+Since `auth-sdk-m8 ≥ 1.0.0`, **RS256 is the default**; choose `HS256` explicitly via
+`ACCESS_TOKEN_ALGORITHM=HS256`. With `JWKS_URI` set, the consumer fetches and caches the
+public key automatically, refreshing on unknown `kid` headers.
 
 ---
 
@@ -922,6 +947,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `1.2.0` | `>=1.0.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.1.4` | `>=0.7.3, <0.8.0` | 3.11, 3.12, 3.13 |
 | `1.1.0–1.1.3` | `>=0.7.1, <0.8.0` | 3.11, 3.12, 3.13 |
 | `1.0.x` | `>=0.7.0, <0.8.0` | 3.11, 3.12, 3.13 |

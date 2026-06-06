@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 COMPAT_MATRIX: dict[str, dict[str, str]] = {
     "1.0": {"auth-sdk-m8": ">=0.7.0,<0.8.0"},
     "1.1": {"auth-sdk-m8": ">=0.7.1,<0.8.0"},
+    # 1.2 consumes auth-sdk-m8 1.0.0 secure-by-default (RS256/JWKS, strict
+    # iss/aud binding, signed event bus) — see CHANGELOG.
+    "1.2": {"auth-sdk-m8": ">=1.0.0,<2.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"

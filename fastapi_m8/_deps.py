@@ -144,7 +144,22 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
     _assert_compat()
 
     hooks: ValidationHooks = _LoggingHooks()  # type: ignore[assignment]
+    # The SDK's build_access_validator reads ACCESS_TOKEN_ALGORITHM,
+    # TOKEN_ISSUER/TOKEN_AUDIENCE, TOKEN_STRICT_VALIDATION and JWKS_URI straight
+    # off the settings object, so a factory-built app inherits auth-sdk's
+    # secure-by-default posture (RS256 + strict iss/aud binding, JWKS resolution
+    # for consumers) with no extra wiring.  Log the effective posture so the
+    # inherited defaults are visible at startup, mirroring revocation.mode below.
     validator = build_access_validator(settings, hooks)
+    _logger.info(
+        "auth.validation algorithm=%s strict=%s jwks=%s iss=%s aud=%s role=%s",
+        settings.ACCESS_TOKEN_ALGORITHM,
+        settings.TOKEN_STRICT_VALIDATION,
+        bool(settings.JWKS_URI),
+        bool(settings.TOKEN_ISSUER),
+        bool(settings.TOKEN_AUDIENCE),
+        settings.AUTH_SERVICE_ROLE,
+    )
 
     revocation_client: RemoteRevocationClient | None = None
     if settings.is_stateful and settings.AUTH_SERVICE_ROLE == "consumer":
