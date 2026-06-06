@@ -7,8 +7,8 @@ from unittest.mock import patch
 import pytest
 from asgi_lifespan import LifespanManager
 from fastapi import APIRouter
-from httpx import ASGITransport, AsyncClient
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from fastapi_m8 import AppLifecycle, HealthConfig, create_app
 from tests.conftest import make_settings
