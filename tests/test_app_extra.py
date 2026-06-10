@@ -192,9 +192,7 @@ def test_hsts_disabled_when_max_age_zero() -> None:
 def test_custom_csp_override_in_production() -> None:
     """A configured CONTENT_SECURITY_POLICY overrides the tight API default."""
     custom = "default-src 'self'; frame-ancestors 'none'"
-    s = make_settings(
-        **_BASE, ENVIRONMENT="production", CONTENT_SECURITY_POLICY=custom
-    )
+    s = make_settings(**_BASE, ENVIRONMENT="production", CONTENT_SECURITY_POLICY=custom)
     app = create_app(s, _router())
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.get("/api/health/")
