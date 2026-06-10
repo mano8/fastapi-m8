@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import anyio
+from auth_sdk_m8.security.headers import add_security_headers_middleware
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -356,6 +357,7 @@ def create_app(
     _init_app_state(app)
     _add_cors_middleware(app, settings)
     _add_trusted_host_middleware(app, settings)
+    add_security_headers_middleware(app, settings)
     _add_metrics_middleware(app, settings)
     authorize = h.detail_authorizer or _build_default_authorizer(settings)
     _register_health_route(

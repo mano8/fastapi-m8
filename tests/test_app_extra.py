@@ -128,3 +128,72 @@ def test_trusted_host_middleware_not_registered_when_empty() -> None:
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.get("/api/health/", headers={"Host": "any-host.example"})
     assert resp.status_code != 400
+
+
+# ── Security headers (F6) ─────────────────────────────────────────────────────
+
+_HARDENING_HEADERS = (
+    "content-security-policy",
+    "x-frame-options",
+    "x-content-type-options",
+    "referrer-policy",
+    "permissions-policy",
+    "strict-transport-security",
+)
+
+
+def test_security_headers_absent_in_local() -> None:
+    """Local/dev is left unrestricted so Swagger/ReDoc/HMR keep working."""
+    s = make_settings(**_BASE, ENVIRONMENT="local")
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/")
+    for header in _HARDENING_HEADERS:
+        assert header not in resp.headers
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"ENVIRONMENT": "production"}, {"STRICT_PRODUCTION_MODE": True}],
+)
+def test_security_headers_applied_in_production(kwargs: dict) -> None:
+    """ENVIRONMENT==production or STRICT_PRODUCTION_MODE emits the hardening set."""
+    s = make_settings(**_BASE, **kwargs)
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/")
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
+    assert resp.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert "max-age=31536000" in resp.headers["strict-transport-security"]
+    assert "includeSubDomains" in resp.headers["strict-transport-security"]
+
+
+def test_security_headers_opt_out_in_production() -> None:
+    """SECURITY_HEADERS_ENABLED=False suppresses the layer even in production."""
+    s = make_settings(**_BASE, ENVIRONMENT="production", SECURITY_HEADERS_ENABLED=False)
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/")
+    assert "content-security-policy" not in resp.headers
+
+
+def test_hsts_disabled_when_max_age_zero() -> None:
+    """HSTS_MAX_AGE=0 drops only the Strict-Transport-Security header."""
+    s = make_settings(**_BASE, ENVIRONMENT="production", HSTS_MAX_AGE=0)
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/")
+    assert "strict-transport-security" not in resp.headers
+    assert "content-security-policy" in resp.headers
+
+
+def test_custom_csp_override_in_production() -> None:
+    """A configured CONTENT_SECURITY_POLICY overrides the tight API default."""
+    custom = "default-src 'self'; frame-ancestors 'none'"
+    s = make_settings(**_BASE, ENVIRONMENT="production", CONTENT_SECURITY_POLICY=custom)
+    app = create_app(s, _router())
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/api/health/")
+    assert resp.headers["content-security-policy"] == custom
