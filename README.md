@@ -514,7 +514,7 @@ Returns a frozen dataclass with everything needed for route protection.
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `int` | User primary key |
+| `id` | `uuid.UUID` | User primary key |
 | `email` | `str` | User email |
 | `full_name` | `str \| None` | Display name |
 | `role` | `RoleType` | `USER` \| `READER` \| `WRITER` \| `ADMIN` \| `SUPERADMIN` |
@@ -773,18 +773,20 @@ TABLES_PREFIX=app
 `SQLALCHEMY_DATABASE_URI` is assembled automatically. You can also set it directly
 to override the assembly.
 
-Define models with `TimestampMixin` from `auth-sdk-m8`:
+Define models with `TimestampMixin` from `auth-sdk-m8` (adds `created_at` /
+`updated_at` UTC columns):
 
 ```python
+import uuid
 from sqlmodel import SQLModel, Field
-from auth_sdk_m8.db.mixins import TimestampMixin
+from auth_sdk_m8.models.shared import TimestampMixin
 
 class Item(TimestampMixin, SQLModel, table=True):
     __tablename__ = "app_items"
 
     id: int | None = Field(default=None, primary_key=True)
     name: str
-    owner_id: int
+    owner_id: uuid.UUID   # references the authenticated user's UUID id
 ```
 
 ---
