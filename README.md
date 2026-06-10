@@ -380,6 +380,28 @@ do not connect to Redis directly.
 > are rejected with HTTP 400. `testserver` is automatically added in non-production so
 > pytest's `TestClient` works without extra configuration.
 
+### Response Security Headers
+
+`create_app` wires the response-hardening layer from
+`auth-sdk-m8` (`auth_sdk_m8.security.headers.add_security_headers_middleware`, since
+`auth-sdk-m8 ≥ 1.1.0`). The headers are emitted **only in production** — when
+`ENVIRONMENT=production` or `STRICT_PRODUCTION_MODE=true` — so local/dev keeps Swagger,
+ReDoc, and HMR working unrestricted. In production the response carries
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, a `Content-Security-Policy`
+with `frame-ancestors 'none'`, `Referrer-Policy`, `Permissions-Policy`, and HSTS.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SECURITY_HEADERS_ENABLED` | `true` | Master switch; set `false` to suppress the layer even in production |
+| `HSTS_MAX_AGE` | `31536000` | `Strict-Transport-Security` max-age in seconds; `0` drops the HSTS header only |
+| `HSTS_INCLUDE_SUBDOMAINS` | `true` | Append `includeSubDomains` to HSTS |
+| `CONTENT_SECURITY_POLICY` | *(hardened default)* | Override the emitted `Content-Security-Policy` |
+| `REFERRER_POLICY` | `strict-origin-when-cross-origin` | `Referrer-Policy` value |
+| `PERMISSIONS_POLICY` | *(restrictive default)* | `Permissions-Policy` value |
+
+> These knobs are inherited from `CommonSettings`; consumer services do not redeclare
+> them. The same layer is shared by `fa-auth-m8` and every consumer.
+
 ---
 
 ## API Reference
@@ -697,8 +719,8 @@ HTTP 200
   ],
   "service": "Item Service",
   "version": "1.0.0",
-  "fastapi_m8": "1.1.0",
-  "auth_sdk_m8": "0.7.x"
+  "fastapi_m8": "1.3.0",
+  "auth_sdk_m8": "1.1.x"
 }
 ```
 
@@ -947,6 +969,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `1.3.0` | `>=1.1.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.2.0` | `>=1.0.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.1.4` | `>=0.7.3, <0.8.0` | 3.11, 3.12, 3.13 |
 | `1.1.0–1.1.3` | `>=0.7.1, <0.8.0` | 3.11, 3.12, 3.13 |
@@ -961,7 +984,7 @@ Check at runtime:
 ```python
 from fastapi_m8 import CAPABILITIES, __version__
 
-print(__version__)          # "1.0.0"
+print(__version__)          # "1.3.0"
 print(CAPABILITIES)         # {"async": False, "db_optional": True, ...}
 ```
 
