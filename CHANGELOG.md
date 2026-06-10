@@ -9,6 +9,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.3.0] — 2026-06-10 · Delegate security-header layer to auth-sdk-m8 1.1.0 (N2)
+
+### Changed
+
+- The response-hardening middleware (`_build_security_headers` /
+  `_add_security_headers_middleware`) is **moved into `auth-sdk-m8`**
+  (`auth_sdk_m8.security.headers.add_security_headers_middleware`). `create_app`
+  now wires the SDK implementation so the auth provider and every consumer share
+  one layer (resolves N2). Behaviour and emitted headers are unchanged.
+- The six header knobs (`SECURITY_HEADERS_ENABLED`, `HSTS_MAX_AGE`,
+  `HSTS_INCLUDE_SUBDOMAINS`, `CONTENT_SECURITY_POLICY`, `REFERRER_POLICY`,
+  `PERMISSIONS_POLICY`) are now inherited from `CommonSettings` rather than
+  redeclared on `ConsumerServiceSettings`. Field names and defaults are
+  unchanged — no env or migration changes required.
+- Requires `auth-sdk-m8>=1.1.0`.
+
+---
+
 ## [1.2.0] — 2026-06-06 · Consume auth-sdk-m8 1.0.0 secure-by-default signing & binding (F1/F2)
 
 > **Requires `auth-sdk-m8 >= 1.0.0`.** That release is **breaking**: the default

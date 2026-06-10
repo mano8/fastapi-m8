@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import anyio
+from auth_sdk_m8.security.headers import add_security_headers_middleware
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -279,63 +280,6 @@ def _add_trusted_host_middleware(
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
 
-_DEFAULT_API_CSP = (
-    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
-)
-
-
-def _build_security_headers(settings: ConsumerServiceSettings) -> list[tuple[str, str]]:
-    """
-    Compute the static response-header list for the hardening layer.
-
-    Mirrors the docs-gating / TrustedHost ``is_production`` contract: HSTS, CSP,
-    ``X-Frame-Options``, ``X-Content-Type-Options``, ``Referrer-Policy`` and
-    ``Permissions-Policy``. Swagger/ReDoc are gated off in production, so the
-    tight default CSP cannot break them.
-    """
-    csp = settings.CONTENT_SECURITY_POLICY or _DEFAULT_API_CSP
-    headers: list[tuple[str, str]] = [
-        ("content-security-policy", csp),
-        ("x-frame-options", "DENY"),
-        ("x-content-type-options", "nosniff"),
-        ("referrer-policy", settings.REFERRER_POLICY),
-        ("permissions-policy", settings.PERMISSIONS_POLICY),
-    ]
-    if settings.HSTS_MAX_AGE > 0:
-        hsts = f"max-age={settings.HSTS_MAX_AGE}"
-        if settings.HSTS_INCLUDE_SUBDOMAINS:
-            hsts += "; includeSubDomains"
-        headers.append(("strict-transport-security", hsts))
-    return headers
-
-
-def _add_security_headers_middleware(
-    app: FastAPI, settings: ConsumerServiceSettings
-) -> None:
-    """
-    Attach production/staging response-hardening headers.
-
-    Gated on ``ENVIRONMENT=="production" or STRICT_PRODUCTION_MODE`` — the same
-    gate used for docs hiding — so local/dev (and Swagger/ReDoc/HMR) is left
-    unrestricted. Implemented as a pure-ASGI wrapper so headers land on every
-    response, including error responses raised before the route handler.
-    """
-    is_production = (
-        settings.ENVIRONMENT == "production" or settings.STRICT_PRODUCTION_MODE
-    )
-    if not (is_production and settings.SECURITY_HEADERS_ENABLED):
-        return
-
-    security_headers = _build_security_headers(settings)
-
-    @app.middleware("http")
-    async def _security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
-        response = await call_next(request)
-        for name, value in security_headers:
-            response.headers[name] = value  # replaces any value the app set
-        return response
-
-
 def _register_health_route(
     app: FastAPI,
     api_prefix: str,
@@ -413,7 +357,7 @@ def create_app(
     _init_app_state(app)
     _add_cors_middleware(app, settings)
     _add_trusted_host_middleware(app, settings)
-    _add_security_headers_middleware(app, settings)
+    add_security_headers_middleware(app, settings)
     _add_metrics_middleware(app, settings)
     authorize = h.detail_authorizer or _build_default_authorizer(settings)
     _register_health_route(

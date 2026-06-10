@@ -23,6 +23,9 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # 1.2 consumes auth-sdk-m8 1.0.0 secure-by-default (RS256/JWKS, strict
     # iss/aud binding, signed event bus) — see CHANGELOG.
     "1.2": {"auth-sdk-m8": ">=1.0.0,<2.0.0"},
+    # 1.3 delegates the response security-header layer to auth-sdk-m8 1.1.0
+    # (auth_sdk_m8.security.headers) — see CHANGELOG / N2.
+    "1.3": {"auth-sdk-m8": ">=1.1.0,<2.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
