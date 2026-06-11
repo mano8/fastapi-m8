@@ -22,7 +22,7 @@ Example::
 from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 
 class ConsumerServiceSettings(
@@ -49,6 +49,18 @@ class ConsumerServiceSettings(
     # HSTS_INCLUDE_SUBDOMAINS, CONTENT_SECURITY_POLICY, REFERRER_POLICY,
     # PERMISSIONS_POLICY) are inherited from CommonSettings; the hardening layer
     # is wired by auth_sdk_m8.security.headers.add_security_headers_middleware.
+
+    # Auth event stream (fa-auth SSE bridge) — client-side timeouts for the
+    # optional AuthEventStreamClient built by build_event_stream_client.
+    # EVENT_SIGNING_KEY (HMAC verification) is inherited from CommonSettings;
+    # INTROSPECTION_URL / PRIVATE_API_SECRET come from ConsumerAuthMixin.
+    EVENT_STREAM_CONNECT_TIMEOUT: float = Field(5.0, gt=0, le=300)
+    EVENT_STREAM_READ_TIMEOUT: float = Field(60.0, gt=0, le=3600)
+    # Short-TTL positive validation cache for JTI revocation checks.
+    # 0 (default) = disabled; cache per-request HTTP calls to fa-auth are made.
+    # Set to e.g. 30 to cache active=True results for 30 s; stream events evict
+    # by JTI/user, an unresumable gap flushes all (requires event stream client).
+    REVOCATION_CACHE_TTL_SECONDS: int = Field(0, ge=0)
 
     @field_validator("ALLOWED_HOSTS", mode="before")
     @classmethod

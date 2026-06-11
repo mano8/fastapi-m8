@@ -55,3 +55,32 @@ def test_allowed_hosts_empty_by_default() -> None:
     """ALLOWED_HOSTS defaults to an empty list (middleware not registered)."""
     s = make_settings()
     assert s.ALLOWED_HOSTS == []
+
+
+def test_event_stream_timeouts_default() -> None:
+    """Auth event-stream timeouts have library-aligned defaults."""
+    s = make_settings()
+    assert s.EVENT_STREAM_CONNECT_TIMEOUT == 5.0
+    assert s.EVENT_STREAM_READ_TIMEOUT == 60.0
+
+
+def test_event_stream_timeouts_overridable() -> None:
+    """EVENT_STREAM_* timeouts accept in-range overrides."""
+    s = make_settings(
+        EVENT_STREAM_CONNECT_TIMEOUT=3.0,
+        EVENT_STREAM_READ_TIMEOUT=120.0,
+    )
+    assert s.EVENT_STREAM_CONNECT_TIMEOUT == 3.0
+    assert s.EVENT_STREAM_READ_TIMEOUT == 120.0
+
+
+def test_event_stream_connect_timeout_rejects_non_positive() -> None:
+    """A non-positive connect timeout fails validation (gt=0)."""
+    with pytest.raises(ValidationError, match="EVENT_STREAM_CONNECT_TIMEOUT"):
+        make_settings(EVENT_STREAM_CONNECT_TIMEOUT=0)
+
+
+def test_event_stream_read_timeout_rejects_out_of_range() -> None:
+    """A read timeout above the ceiling fails validation (le=3600)."""
+    with pytest.raises(ValidationError, match="EVENT_STREAM_READ_TIMEOUT"):
+        make_settings(EVENT_STREAM_READ_TIMEOUT=99999)

@@ -9,6 +9,11 @@ Tier 1 — everyday service API::
     from fastapi_m8 import create_db_engine, DbEngine
     from fastapi_m8 import ConsumerServiceSettings
 
+Tier 1 — auth event stream (fa-auth SSE bridge)::
+
+    from fastapi_m8 import build_event_stream_client
+    from fastapi_m8 import AuthEventStreamClient, AuthStreamEvent, derive_stream_url
+
 Tier 2 — health building blocks::
 
     from fastapi_m8 import (
@@ -29,6 +34,14 @@ from fastapi_m8._async_stub import CAPABILITIES, capabilities, create_async_app
 from fastapi_m8._compat import COMPAT_MATRIX
 from fastapi_m8._deps import AuthDeps, build_auth_deps
 from fastapi_m8._engine import DbEngine, create_db_engine
+
+# Tier 1 — auth event stream
+from fastapi_m8._events import (
+    AuthEventStreamClient,
+    AuthStreamEvent,
+    build_event_stream_client,
+    derive_stream_url,
+)
 
 # Tier 2
 from fastapi_m8._health import (
@@ -51,6 +64,11 @@ __all__ = [
     "create_db_engine",
     "DbEngine",
     "ConsumerServiceSettings",
+    # Tier 1 — auth event stream
+    "build_event_stream_client",
+    "AuthEventStreamClient",
+    "AuthStreamEvent",
+    "derive_stream_url",
     # Tier 2
     "HealthStatus",
     "HealthCheckResult",

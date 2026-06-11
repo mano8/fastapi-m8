@@ -42,12 +42,12 @@ def _validate_access_token(validator: Any, token: str) -> Any:
 
 
 async def _check_token_revocation(
-    revocation_client: RemoteRevocationClient | None, jti: str
+    revocation_client: RemoteRevocationClient | None, jti: str, user_id: str = ""
 ) -> None:
     if revocation_client is None:
         return
     try:
-        if await revocation_client.is_revoked(jti):
+        if await revocation_client.is_revoked(jti, user_id=user_id):
             raise HTTPException(
                 status_code=_FORBIDDEN,
                 detail="Token has been revoked.",
@@ -117,6 +117,21 @@ class AuthDeps:
     get_current_active_superuser: Callable
     revocation_client: RemoteRevocationClient | None
 
+    def evict_jti(self, jti: str) -> None:
+        """Evict one JTI from the validation cache (on session.revoked event)."""
+        if self.revocation_client is not None:
+            self.revocation_client.evict_jti(jti)
+
+    def evict_user(self, user_id: str) -> None:
+        """Evict all JTIs for a user from the cache (on user.deleted event)."""
+        if self.revocation_client is not None:
+            self.revocation_client.evict_user(user_id)
+
+    def flush_cache(self) -> None:
+        """Flush the entire validation cache (on unresumable stream gap)."""
+        if self.revocation_client is not None:
+            self.revocation_client.flush_cache()
+
     async def close(self) -> None:
         """Teardown owner: close the revocation client (and future clients)."""
         if self.revocation_client is not None:
@@ -174,6 +189,7 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
             introspection_url=str(settings.INTROSPECTION_URL),
             private_api_secret=settings.PRIVATE_API_SECRET.get_secret_value(),  # type: ignore[union-attr]
             fail_closed=(revocation_mode == "fail_closed"),
+            cache_ttl=settings.REVOCATION_CACHE_TTL_SECONDS,
         )
 
     reusable_oauth2 = OAuth2PasswordBearer(
@@ -184,7 +200,7 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
     async def get_current_user(token: TokenDep) -> UserModel:
         """Extract and validate the current user from the JWT access token."""
         payload = _validate_access_token(validator, token)
-        await _check_token_revocation(revocation_client, payload.jti)
+        await _check_token_revocation(revocation_client, payload.jti, payload.sub)
         return _build_active_user(payload)
 
     CurrentUser = Annotated[UserModel, Depends(get_current_user)]

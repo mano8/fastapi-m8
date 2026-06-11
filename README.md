@@ -237,9 +237,10 @@ TOKEN_AUDIENCE=item-service
 # ACCESS_TOKEN_ALGORITHM=HS256
 # ACCESS_SECRET_KEY=change-me-32-chars-minimum
 
-# Event-bus signing is ON by default (inherited from auth-sdk-m8>=1.0.0).
-EVENT_SIGNING_KEY=change-me-event-signing-32-chars
-# EVENT_SIGNING_ENABLED=false   # opt out only if you do not use the event bus
+# Event signing is ON by default — SSE payloads from fa-auth are HMAC-signed.
+# DEV-ONLY placeholder — replace with the same value set on fa-auth in staging/production.
+EVENT_SIGNING_KEY=DEV-ONLY-do-not-use-event-signing-key-Aa1!
+# EVENT_SIGNING_ENABLED=false   # opt out only if signing is also disabled on fa-auth
 
 TOKEN_MODE=stateless
 AUTH_SERVICE_ROLE=consumer
@@ -303,8 +304,8 @@ environment variable.
 | `TOKEN_STRICT_VALIDATION` | No | `true` | Secure-by-default: enforce `iss`/`aud` binding; **requires `TOKEN_ISSUER` + `TOKEN_AUDIENCE` at boot**. Set `false` for single-service/dev. |
 | `TOKEN_ISSUER` | Yes¹ | — | Expected `iss` claim. Required at boot under strict validation. |
 | `TOKEN_AUDIENCE` | Yes¹ | — | Expected `aud` claim (this service). Required at boot under strict validation. |
-| `EVENT_SIGNING_ENABLED` | No | `true` | Secure-by-default: HMAC-sign event-bus payloads. Set `false` to disable. |
-| `EVENT_SIGNING_KEY` | Yes² | — | Shared HMAC secret for the event bus. Required at boot unless `EVENT_SIGNING_ENABLED=false`. |
+| `EVENT_SIGNING_ENABLED` | No | `true` | Secure-by-default: HMAC-sign SSE event payloads. Set `false` to disable. |
+| `EVENT_SIGNING_KEY` | Yes² | — | Shared HMAC secret for SSE payload verification. Must match fa-auth. Required at boot unless `EVENT_SIGNING_ENABLED=false`. |
 
 ¹ Required unless `TOKEN_STRICT_VALIDATION=false`. ² Required unless `EVENT_SIGNING_ENABLED=false`.
 
@@ -322,6 +323,64 @@ Required only when `TOKEN_MODE=stateful` and `AUTH_SERVICE_ROLE=consumer`.
 |---|---|---|---|
 | `INTROSPECTION_URL` | Yes | — | `POST` endpoint on auth service for JTI revocation checks, e.g. `http://auth_user_service:8000/user/private/v1/jti-status` |
 | `PRIVATE_API_SECRET` | Yes | — | Shared secret for `X-Internal-Token` header (must match auth service) |
+
+### Auth Event Stream (fa-auth SSE bridge)
+
+An **optional, best-effort accelerator** for cache eviction. `fa-auth-m8` bridges its
+own auth-state events (`session-revoked`, `user-deleted`) to consumers over an
+authenticated Server-Sent Events stream on the **existing private API** — the same
+trust channel (`INTROSPECTION_URL` + `PRIVATE_API_SECRET`) already used for JTI checks.
+No second Redis, no broker: consumers speak HTTPS to fa-auth, which they already do.
+
+> The stream is **not** the revocation authority — the JTI blacklist behind
+> `INTROSPECTION_URL` is. A consumer that misses every event is still correct, just
+> slower to evict caches. Stream loss is non-fatal; the service keeps running on the
+> HTTP authority path alone.
+
+Wire it in your lifespan with `build_event_stream_client`, which constructs the SDK's
+`AuthEventStreamClient` from your settings (no SDK internals needed):
+
+```python
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi_m8 import build_event_stream_client, AuthStreamEvent
+
+
+async def on_auth_event(event: AuthStreamEvent) -> None:
+    # session-revoked / user-deleted → evict the affected entry from local caches.
+    ...
+
+
+async def on_gap() -> None:
+    # Unresumable stream (fa-auth restarted / buffer evicted) → flush ALL caches.
+    ...
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    client = build_event_stream_client(
+        settings,
+        on_event=on_auth_event,
+        on_gap=on_gap,
+    )
+    client.start()
+    try:
+        yield
+    finally:
+        await client.stop()
+```
+
+The client verifies every payload's HMAC signature with `EVENT_SIGNING_KEY` (must match
+fa-auth), auto-reconnects with jittered backoff, resumes via `Last-Event-ID`, and **never
+raises into the host app**. Requires `TOKEN_MODE=stateful` so `INTROSPECTION_URL` and
+`PRIVATE_API_SECRET` are present. Behind a reverse proxy, disable response buffering on
+the stream endpoint so events and heartbeats pass through promptly.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `EVENT_STREAM_CONNECT_TIMEOUT` | No | `5` | Seconds to wait for the initial SSE connection (factory arg). |
+| `EVENT_STREAM_READ_TIMEOUT` | No | `60` | Seconds to wait between SSE frames; keep above fa-auth's heartbeat interval (default 15 s). |
 
 ### Database
 

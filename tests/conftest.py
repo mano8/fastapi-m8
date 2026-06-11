@@ -25,7 +25,10 @@ from pydantic_settings import SettingsConfigDict
 
 from fastapi_m8.config import ConsumerServiceSettings
 
-VALID_KEY = "Abcdef-1234_XYZ-abcdef-ghijkl-mnopqr-stuvwx"
+# A strong test key outside auth-sdk-m8's forbidden dev-placeholder set
+# (the old "Abcdef-1234…" literal is now rejected in production by the SA.3
+# guard shipped in auth-sdk-m8 1.2.0). Satisfies SECRET_KEY_REGEX.
+VALID_KEY = "Fastapi-M8-Test_Key-2026_xyz-abc-9!"
 VALID_PASSWORD = "ValidPass1!"
 
 # Secure-by-default token binding — both services must agree on these values.

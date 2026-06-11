@@ -9,6 +9,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.4.0] — 2026-06-11 · Auth event-stream consumer surface (SC)
+
+> **Requires `auth-sdk-m8 >= 1.2.0`** — additive: ships the `events/` SSE client package.
+> Consumers need no changes until they opt into the stream.
+
+### Added
+
+- `build_event_stream_client(settings, on_event=…, on_gap=…)` — convenience factory that
+  constructs the SDK's `AuthEventStreamClient` straight from a `ConsumerServiceSettings`
+  instance (derives the SSE stream URL from `INTROSPECTION_URL`, unwraps
+  `PRIVATE_API_SECRET` / `EVENT_SIGNING_KEY`), so services wire the fa-auth event-stream
+  bridge in their lifespan without touching SDK internals.
+- Re-exports on the package root: `AuthEventStreamClient`, `AuthStreamEvent`,
+  `derive_stream_url`.
+- `EVENT_STREAM_CONNECT_TIMEOUT` (default `5`) and `EVENT_STREAM_READ_TIMEOUT`
+  (default `60`) settings on `ConsumerServiceSettings` — client-side timeouts for the
+  stream; keep the read timeout above fa-auth's heartbeat interval. Explicit factory args
+  still override them.
+
+### Changed
+
+- `auth-sdk-m8` pin → `>=1.2.0,<2.0.0` and the `events` extra is now required;
+  `COMPAT_MATRIX` gains a `1.4` entry for the same range.
+
+### Fixed
+
+- `.env.example` / README: replaced the stale `change-me-event-signing-32-chars`
+  placeholder with the DEV-ONLY convention fa-auth uses
+  (`DEV-ONLY-do-not-use-event-signing-key-Aa1!`); event-signing docs reframed around the
+  SSE bridge (HMAC verification of stream payloads) rather than the deprecated Redis bus.
+
+### Notes
+
+- The stream is a **best-effort cache accelerator**, not the revocation authority — the JTI
+  blacklist behind `INTROSPECTION_URL` remains source of truth. Stream loss is non-fatal.
+
+---
+
 ## [1.3.0] — 2026-06-10 · Delegate security-header layer to auth-sdk-m8 1.1.0 (N2)
 
 ### Changed
