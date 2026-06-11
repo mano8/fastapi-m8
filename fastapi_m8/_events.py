@@ -18,9 +18,10 @@ Typical lifespan wiring::
             on_gap=flush_all_caches,
         )
         client.start()
-
-Yield
-        await client.stop()
+        try:
+            yield
+        finally:
+            await client.stop()
 
 """
 

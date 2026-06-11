@@ -308,3 +308,78 @@ def test_get_current_active_superuser_raises_for_superuser_flag_with_insufficien
     with pytest.raises(HTTPException) as exc_info:
         auth.get_current_active_superuser(_make_user(RoleType.ADMIN, is_superuser=True))
     assert exc_info.value.status_code == 403
+
+
+# ── AuthDeps cache eviction helpers ──────────────────────────────────────────
+
+
+def _stateful_auth(**overrides):  # type: ignore[return]
+    s = make_settings(
+        TOKEN_MODE="stateful",
+        INTROSPECTION_URL="http://auth:8000/private/v1/jti-status",
+        PRIVATE_API_SECRET="supersecret",
+        **overrides,
+    )
+    return build_auth_deps(s)
+
+
+def test_evict_jti_noop_without_revocation_client() -> None:
+    """evict_jti is a no-op in stateless mode (no revocation client)."""
+    auth = build_auth_deps(make_settings())
+    auth.evict_jti("jti-x")  # must not raise
+
+
+def test_evict_user_noop_without_revocation_client() -> None:
+    """evict_user is a no-op in stateless mode."""
+    auth = build_auth_deps(make_settings())
+    auth.evict_user("user-x")  # must not raise
+
+
+def test_flush_cache_noop_without_revocation_client() -> None:
+    """flush_cache is a no-op in stateless mode."""
+    auth = build_auth_deps(make_settings())
+    auth.flush_cache()  # must not raise
+
+
+def test_evict_jti_delegates_when_cache_enabled() -> None:
+    """evict_jti reaches the revocation client cache."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    assert auth.revocation_client._cache is not None
+    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.evict_jti("jti-1")
+    assert auth.revocation_client._cache.get("jti-1") is None
+
+
+def test_evict_user_delegates_when_cache_enabled() -> None:
+    """evict_user reaches the revocation client cache."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    assert auth.revocation_client._cache is not None
+    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.evict_user("user-a")
+    assert auth.revocation_client._cache.get("jti-1") is None
+
+
+def test_flush_cache_delegates_when_cache_enabled() -> None:
+    """flush_cache clears the revocation client cache."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    assert auth.revocation_client._cache is not None
+    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.flush_cache()
+    assert auth.revocation_client._cache.get("jti-1") is None
+
+
+def test_revocation_cache_disabled_by_default() -> None:
+    """REVOCATION_CACHE_TTL_SECONDS=0 (default) means no cache is allocated."""
+    auth = _stateful_auth()
+    assert auth.revocation_client is not None
+    assert auth.revocation_client._cache is None
+
+
+def test_revocation_cache_enabled_when_ttl_set() -> None:
+    """REVOCATION_CACHE_TTL_SECONDS > 0 allocates the cache."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=60)
+    assert auth.revocation_client is not None
+    assert auth.revocation_client._cache is not None

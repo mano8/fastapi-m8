@@ -56,6 +56,11 @@ class ConsumerServiceSettings(
     # INTROSPECTION_URL / PRIVATE_API_SECRET come from ConsumerAuthMixin.
     EVENT_STREAM_CONNECT_TIMEOUT: float = Field(5.0, gt=0, le=300)
     EVENT_STREAM_READ_TIMEOUT: float = Field(60.0, gt=0, le=3600)
+    # Short-TTL positive validation cache for JTI revocation checks.
+    # 0 (default) = disabled; cache per-request HTTP calls to fa-auth are made.
+    # Set to e.g. 30 to cache active=True results for 30 s; stream events evict
+    # by JTI/user, an unresumable gap flushes all (requires event stream client).
+    REVOCATION_CACHE_TTL_SECONDS: int = Field(0, ge=0)
 
     @field_validator("ALLOWED_HOSTS", mode="before")
     @classmethod
