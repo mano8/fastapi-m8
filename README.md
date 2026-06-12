@@ -442,21 +442,36 @@ do not connect to Redis directly.
 ### Response Security Headers
 
 `create_app` wires the response-hardening layer from
-`auth-sdk-m8` (`auth_sdk_m8.security.headers.add_security_headers_middleware`, since
-`auth-sdk-m8 ≥ 1.1.0`). The headers are emitted **only in production** — when
-`ENVIRONMENT=production` or `STRICT_PRODUCTION_MODE=true` — so local/dev keeps Swagger,
-ReDoc, and HMR working unrestricted. In production the response carries
-`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, a `Content-Security-Policy`
-with `frame-ancestors 'none'`, `Referrer-Policy`, `Permissions-Policy`, and HSTS.
+`auth-sdk-m8` (`auth_sdk_m8.security.headers.add_security_headers_middleware`, tiered
+since `auth-sdk-m8 ≥ 1.2.1`). Headers are applied in three tiers — the browser-persisted
+HSTS and CSP are now **express opt-in** rather than inferred from the production gate:
+
+| Tier | Headers | When applied |
+|---|---|---|
+| Always-on | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` | Every environment (when `SECURITY_HEADERS_ENABLED`) — safe for Swagger/ReDoc/HMR |
+| Production-gated | `Referrer-Policy`, `Permissions-Policy` | `ENVIRONMENT=production` or `STRICT_PRODUCTION_MODE=true` |
+| Express opt-in | `Strict-Transport-Security`, `Content-Security-Policy` | `HSTS_ENABLED` / `CONTENT_SECURITY_POLICY_ENABLED` — **never on `local`**, even when opted in |
+
+The opt-in tier is decoupled from the production gate, so a TLS-terminated `staging` stack
+can enable HSTS/CSP without masquerading as production. They are hard-blocked on
+`ENVIRONMENT=local` because HSTS is browser-persisted and would poison the localhost HTTPS
+cache for `HSTS_MAX_AGE` seconds (a real risk when a production-configured build is run
+locally before deploy).
 
 | Variable | Default | Description |
 |---|---|---|
-| `SECURITY_HEADERS_ENABLED` | `true` | Master switch; set `false` to suppress the layer even in production |
-| `HSTS_MAX_AGE` | `31536000` | `Strict-Transport-Security` max-age in seconds; `0` drops the HSTS header only |
+| `SECURITY_HEADERS_ENABLED` | `true` | Master switch; set `false` to suppress every tier |
+| `HSTS_ENABLED` | `false` | Opt in to `Strict-Transport-Security` (never emitted on `local`) |
+| `HSTS_MAX_AGE` | `31536000` | HSTS max-age in seconds; `0` drops the HSTS header even when enabled |
 | `HSTS_INCLUDE_SUBDOMAINS` | `true` | Append `includeSubDomains` to HSTS |
+| `CONTENT_SECURITY_POLICY_ENABLED` | `false` | Opt in to `Content-Security-Policy` (never emitted on `local`) |
 | `CONTENT_SECURITY_POLICY` | *(hardened default)* | Override the emitted `Content-Security-Policy` |
-| `REFERRER_POLICY` | `strict-origin-when-cross-origin` | `Referrer-Policy` value |
-| `PERMISSIONS_POLICY` | *(restrictive default)* | `Permissions-Policy` value |
+| `REFERRER_POLICY` | `strict-origin-when-cross-origin` | `Referrer-Policy` value (production-gated) |
+| `PERMISSIONS_POLICY` | *(restrictive default)* | `Permissions-Policy` value (production-gated) |
+
+> **Behaviour change (since 1.5.0 / auth-sdk-m8 1.2.1):** HSTS and CSP were emitted
+> automatically in production before; they are now **off until explicitly enabled**. To
+> restore the previous behaviour set `HSTS_ENABLED=true` and `CONTENT_SECURITY_POLICY_ENABLED=true`.
 
 > These knobs are inherited from `CommonSettings`; consumer services do not redeclare
 > them. The same layer is shared by `fa-auth-m8` and every consumer.

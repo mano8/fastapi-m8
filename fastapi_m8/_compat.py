@@ -29,6 +29,10 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # 1.4 adds AuthEventStreamClient re-exports + build_event_stream_client factory
     # (auth-sdk-m8 1.2.0 ships the events/ package) — see CHANGELOG / SC.
     "1.4": {"auth-sdk-m8": ">=1.2.0,<2.0.0"},
+    # 1.5 tracks auth-sdk-m8 1.2.1 tiered security headers: HSTS/CSP are now
+    # express opt-in (HSTS_ENABLED / CONTENT_SECURITY_POLICY_ENABLED) and never
+    # emitted on local — see CHANGELOG.
+    "1.5": {"auth-sdk-m8": ">=1.2.1,<2.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
