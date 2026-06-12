@@ -45,10 +45,13 @@ class ConsumerServiceSettings(
     # In production set to your public hostname(s), e.g. "api.example.com".
     ALLOWED_HOSTS: list[str] = []
 
-    # Response security-header knobs (SECURITY_HEADERS_ENABLED, HSTS_MAX_AGE,
-    # HSTS_INCLUDE_SUBDOMAINS, CONTENT_SECURITY_POLICY, REFERRER_POLICY,
-    # PERMISSIONS_POLICY) are inherited from CommonSettings; the hardening layer
-    # is wired by auth_sdk_m8.security.headers.add_security_headers_middleware.
+    # Response security-header knobs (SECURITY_HEADERS_ENABLED, HSTS_ENABLED,
+    # HSTS_MAX_AGE, HSTS_INCLUDE_SUBDOMAINS, CONTENT_SECURITY_POLICY_ENABLED,
+    # CONTENT_SECURITY_POLICY, REFERRER_POLICY, PERMISSIONS_POLICY) are inherited
+    # from CommonSettings; the hardening layer is wired by
+    # auth_sdk_m8.security.headers.add_security_headers_middleware. HSTS/CSP are
+    # express opt-in (HSTS_ENABLED / CONTENT_SECURITY_POLICY_ENABLED) and never
+    # emitted on a local stack — see auth-sdk-m8 1.2.1.
 
     # Auth event stream (fa-auth SSE bridge) — client-side timeouts for the
     # optional AuthEventStreamClient built by build_event_stream_client.

@@ -9,6 +9,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.5.0] — 2026-06-12 · Track auth-sdk-m8 1.2.1 tiered security headers; HSTS/CSP opt-in
+
+> **Requires `auth-sdk-m8 >= 1.2.1`** — picks up the tiered response-header model. The
+> always-on subset (`X-Content-Type-Options`, `X-Frame-Options`) and the production-gated
+> subset (`Referrer-Policy`, `Permissions-Policy`) are unchanged; **HSTS and CSP are now
+> express opt-in** instead of being inferred from the production gate.
+
+### Changed
+
+- `auth-sdk-m8` pin → `>=1.2.1,<2.0.0`; `COMPAT_MATRIX` gains a `1.5` entry for the same
+  range. `create_app` keeps wiring `add_security_headers_middleware`; the tier change lives
+  in the shared SDK so `fa-auth-m8` and every consumer move together.
+- `ConsumerServiceSettings` inherits two new knobs from `CommonSettings`: `HSTS_ENABLED`
+  and `CONTENT_SECURITY_POLICY_ENABLED` (both default `False`). No service redeclares them.
+- README **Response Security Headers** section rewritten as a three-tier table with the
+  opt-in rationale; security-header tests rewritten for the tiered model (local always-on
+  subset, local HSTS/CSP hard-block even when opted in, production-without-opt-in, full
+  opt-in, opt-in decoupled from the production gate on `staging`, master-switch suppression,
+  `HSTS_MAX_AGE=0`, `includeSubDomains` off, custom CSP).
+
+### ⚠️ Behaviour change
+
+HSTS and CSP, emitted automatically in production by `fastapi-m8 1.3.0`–`1.4.0`, are now
+**off until explicitly enabled** and are **never emitted when `ENVIRONMENT=local`** even
+when opted in — preventing a production-configured build run on localhost from poisoning the
+host's HSTS cache. To restore the previous production behaviour:
+
+```ini
+HSTS_ENABLED=true
+CONTENT_SECURITY_POLICY_ENABLED=true
+```
+
+---
+
 ## [1.4.0] — 2026-06-11 · Auth event-stream consumer surface (SC)
 
 > **Requires `auth-sdk-m8 >= 1.2.0`** — additive: ships the `events/` SSE client package.
