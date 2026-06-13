@@ -99,6 +99,28 @@ async def test_get_current_user_valid_token() -> None:
     assert isinstance(user, UserModel)
 
 
+# ── tenant_id passthrough (auth-sdk-m8 >= 1.3.0) ──────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_get_current_user_forwards_tenant_id() -> None:
+    """A token carrying tenant_id flows through to CurrentUser.tenant_id as a UUID."""
+    import uuid
+
+    tenant = "7f1c4e2a-9b3d-4c5e-8a6f-1234567890ab"
+    auth = build_auth_deps(make_settings())
+    user = await auth.get_current_user(make_access_token(tenant_id=tenant))
+    assert user.tenant_id == uuid.UUID(tenant)
+
+
+@pytest.mark.anyio
+async def test_get_current_user_tenant_id_defaults_to_none() -> None:
+    """A token without tenant_id yields CurrentUser.tenant_id is None."""
+    auth = build_auth_deps(make_settings())
+    user = await auth.get_current_user(make_access_token())
+    assert user.tenant_id is None
+
+
 # ── secure-by-default: RS256 + strict iss/aud binding (F1/F2) ──────────────────
 
 

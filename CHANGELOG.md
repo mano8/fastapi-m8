@@ -9,6 +9,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [1.6.0] — 2026-06-13 · Track auth-sdk-m8 1.3.0; expose `CurrentUser.tenant_id`
+
+> **Requires `auth-sdk-m8 >= 1.3.0`** — picks up the optional `tenant_id` claim added to the
+> token payload (`TokenAccessData`/`TokenUserData`) and to `UserModel`. No logic change in
+> `fastapi-m8`: `_build_active_user` already forwards every payload field into `UserModel`, so
+> the new claim flows through to `CurrentUser.tenant_id` automatically.
+
+### Changed
+
+- `auth-sdk-m8` pin → `>=1.3.0,<2.0.0`; `COMPAT_MATRIX` gains a `1.6` entry for the same range.
+  Services injecting `auth.CurrentUser` now see `current_user.tenant_id` populated (a `UUID`)
+  whenever the issuing token carries the claim, and `None` for untenanted/legacy tokens.
+
+### Added
+
+- `test_deps`: passthrough assertions pinning the contract that `_build_active_user` forwards
+  `tenant_id` — a token carrying the claim yields a `UserModel` whose `.tenant_id` is the
+  expected `UUID`; a token without it yields `None`.
+
+---
+
 ## [1.5.0] — 2026-06-12 · Track auth-sdk-m8 1.2.1 tiered security headers; HSTS/CSP opt-in
 
 > **Requires `auth-sdk-m8 >= 1.2.1`** — picks up the tiered response-header model. The
