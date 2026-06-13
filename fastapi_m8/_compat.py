@@ -33,6 +33,10 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # express opt-in (HSTS_ENABLED / CONTENT_SECURITY_POLICY_ENABLED) and never
     # emitted on local — see CHANGELOG.
     "1.5": {"auth-sdk-m8": ">=1.2.1,<2.0.0"},
+    # 1.6 consumes auth-sdk-m8 1.3.0, which adds the optional tenant_id claim to
+    # the token payload + UserModel; _build_active_user forwards it unchanged so
+    # CurrentUser.tenant_id is now populated — see CHANGELOG.
+    "1.6": {"auth-sdk-m8": ">=1.3.0,<2.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
