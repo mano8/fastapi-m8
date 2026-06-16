@@ -22,6 +22,7 @@ Example::
 from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
+from auth_sdk_m8.schemas.meta import ServiceContract, ServiceMeta
 from pydantic import Field, field_validator
 
 
@@ -64,6 +65,41 @@ class ConsumerServiceSettings(
     # Set to e.g. 30 to cache active=True results for 30 s; stream events evict
     # by JTI/user, an unresumable gap flushes all (requires event stream client).
     REVOCATION_CACHE_TTL_SECONDS: int = Field(0, ge=0)
+
+    # Service/contract metadata served at ``{API_PREFIX}/meta`` (see
+    # auth_sdk_m8.controllers.meta). These are **required** so every consumer
+    # fails closed at boot if it doesn't declare its identity — clients read
+    # /meta pre-auth to assert compatibility. ``/ping`` carries no values.
+    SERVICE_VERSION: str = Field(
+        ..., description="Service package version, e.g. '1.0.0'."
+    )
+    API_VERSION: str = Field("v1", description="Public API version, e.g. 'v1'.")
+    CONTRACT_NAME: str | None = Field(
+        None, description="Contract name; defaults to PROJECT_NAME when unset."
+    )
+    CONTRACT_VERSION: str = Field(..., description="Contract version, e.g. '1.0'.")
+    CONTRACT_RANGE: str = Field(
+        ..., description="Compatible contract semver range, e.g. '>=1.0.0 <2.0.0'."
+    )
+
+    def build_service_meta(self) -> ServiceMeta:
+        """
+        Build the public ``ServiceMeta`` served at ``{API_PREFIX}/meta``.
+
+        Fails closed: the required version/contract settings must be present and
+        non-empty (``ServiceMeta`` enforces ``min_length=1``) or this raises
+        before the app serves traffic.
+        """
+        return ServiceMeta(
+            service=self.PROJECT_NAME,
+            version=self.SERVICE_VERSION,
+            api_version=self.API_VERSION,
+            contract=ServiceContract(
+                name=self.CONTRACT_NAME or self.PROJECT_NAME,
+                version=self.CONTRACT_VERSION,
+                range=self.CONTRACT_RANGE,
+            ),
+        )
 
     @field_validator("ALLOWED_HOSTS", mode="before")
     @classmethod
