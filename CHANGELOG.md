@@ -9,6 +9,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [2.0.0] — 2026-06-16 · Auto-mounted `/meta` + `/ping`; required service metadata
+
+> **Requires `auth-sdk-m8 >= 1.4.0`** — uses `mount_service_meta` + `ServiceMeta` from the SDK.
+
+**BREAKING.** `create_app` now auto-mounts the standard m8 service triad alongside `/health`:
+
+- `GET {API_PREFIX}/meta` — static, cacheable `ServiceMeta` (service/version/contract) read by
+  clients pre-auth to assert compatibility. No duplicate route logic — it calls auth-sdk-m8's
+  `mount_service_meta`.
+- `GET /ping` — prefix-independent, dependency-free liveness (`{"status": "ok"}`).
+
+### Added
+
+- `ConsumerServiceSettings` gains `SERVICE_VERSION`, `CONTRACT_VERSION`, `CONTRACT_RANGE`
+  (**required**), plus `API_VERSION` (default `v1`) and `CONTRACT_NAME` (defaults to
+  `PROJECT_NAME`), and a `build_service_meta()` helper. Every consumer now **fails closed at
+  boot** if it doesn't declare its service/contract identity.
+
+### Changed
+
+- `_openapi_config` falls back to `settings.SERVICE_VERSION` (single source of truth) instead of
+  the previous `"0.0.0"` literal when `service_version` isn't passed to `create_app`.
+- `auth-sdk-m8` dependency bumped to `>=1.4.0,<2.0.0`; compat matrix adds the `2.0` row.
+
+### Migration
+
+Every consumer must set `SERVICE_VERSION`, `CONTRACT_VERSION`, and `CONTRACT_RANGE` (e.g. in
+`.env` / `.env.example`) before it will boot. Point container **liveness** probes at `/ping` and
+**readiness** probes at `{API_PREFIX}/health/`.
+
+---
+
 ## [1.6.0] — 2026-06-13 · Track auth-sdk-m8 1.3.0; expose `CurrentUser.tenant_id`
 
 > **Requires `auth-sdk-m8 >= 1.3.0`** — picks up the optional `tenant_id` claim added to the

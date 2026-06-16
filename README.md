@@ -56,6 +56,7 @@ health checks; the framework wires the rest.
 | CORS | Auto-wired from `settings.ALLOWED_ORIGINS` |
 | Metrics middleware | Optional; toggled via `METRICS_ENABLED` |
 | Health endpoint | `GET {API_PREFIX}/health/` with optional detail gating |
+| Service meta + liveness | Auto-mounted `GET {API_PREFIX}/meta` + `GET /ping` (fail-closed at boot) |
 | Database lifecycle | `create_db_engine()` wrapping SQLAlchemy |
 | Startup validation | `startup_validators` list runs before app signals ready |
 | Lifespan management | Auth teardown + DB pool dispose on shutdown |
@@ -245,6 +246,14 @@ EVENT_SIGNING_KEY=DEV-ONLY-do-not-use-event-signing-key-Aa1!
 TOKEN_MODE=stateless
 AUTH_SERVICE_ROLE=consumer
 
+# Service/contract metadata — served at {API_PREFIX}/meta for client compat
+# checks. REQUIRED: the app fails closed at boot without them. (/ping needs none.)
+SERVICE_VERSION=1.0.0
+CONTRACT_VERSION=1.0
+CONTRACT_RANGE=>=1.0.0 <2.0.0
+# API_VERSION=v1                 # default
+# CONTRACT_NAME=item-service     # defaults to PROJECT_NAME
+
 # Host validation — set in production to prevent host-header injection
 # ALLOWED_HOSTS=api.example.com
 
@@ -286,6 +295,22 @@ environment variable.
 | `BACKEND_HOST` | Yes | — | Full backend URL, e.g. `http://127.0.0.1:8000` |
 | `FRONTEND_HOST` | Yes | — | Full frontend URL |
 | `BACKEND_CORS_ORIGINS` | Yes | — | Comma-separated allowed origins |
+
+### Service Metadata (`/meta`)
+
+`create_app` auto-mounts the shared service triad from `auth-sdk-m8`: `GET {API_PREFIX}/meta`
+(cacheable service/version/contract identity, read by clients pre-auth to assert compatibility)
+and a prefix-independent `GET /ping` (dependency-free liveness → `{"status": "ok"}`). The `/meta`
+values are sourced from these settings, so a consumer **fails closed at boot** if it doesn't
+declare its identity. Keep both separate from a dependency-aware `/health` readiness probe.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SERVICE_VERSION` | Yes | — | Service package version, e.g. `1.0.0` |
+| `CONTRACT_VERSION` | Yes | — | Contract version, e.g. `1.0` |
+| `CONTRACT_RANGE` | Yes | — | Compatible contract semver range, e.g. `>=1.0.0 <2.0.0` |
+| `API_VERSION` | No | `v1` | Public API version label |
+| `CONTRACT_NAME` | No | `PROJECT_NAME` | Contract name (defaults to the service name) |
 
 ### Tokens & Cryptography
 

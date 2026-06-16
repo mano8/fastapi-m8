@@ -37,6 +37,11 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # the token payload + UserModel; _build_active_user forwards it unchanged so
     # CurrentUser.tenant_id is now populated — see CHANGELOG.
     "1.6": {"auth-sdk-m8": ">=1.3.0,<2.0.0"},
+    # 2.0 auto-mounts the shared /meta + /ping routes in create_app, sourced from
+    # the new required ConsumerServiceSettings version/contract fields (fail-closed
+    # at boot). Requires auth-sdk-m8 1.4.0, which ships mount_service_meta +
+    # ServiceMeta — see CHANGELOG. BREAKING: consumers must declare their meta.
+    "2.0": {"auth-sdk-m8": ">=1.4.0,<2.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"

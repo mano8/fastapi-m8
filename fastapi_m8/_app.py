@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import anyio
+from auth_sdk_m8.controllers.meta import mount_service_meta
 from auth_sdk_m8.security.headers import add_security_headers_middleware
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -231,7 +232,7 @@ def _openapi_config(
     """Build FastAPI constructor kwargs for title, version, and OpenAPI URLs."""
     return {
         "title": service_name or settings.PROJECT_NAME,
-        "version": service_version or "0.0.0",
+        "version": service_version or settings.SERVICE_VERSION,
         "openapi_url": (
             f"{settings.API_PREFIX}/openapi.json"
             if settings.effective_set_open_api
@@ -311,6 +312,17 @@ def _register_health_route(
         return JSONResponse(body, status_code=code)
 
 
+def _register_meta_routes(app: FastAPI, settings: ConsumerServiceSettings) -> None:
+    """
+    Mount the shared ``/meta`` + ``/ping`` routes (fail-closed at boot).
+
+    Sources the values from ``settings.build_service_meta()`` so the whole
+    consumer fleet exposes an identical shape and *can't forget* — a consumer
+    without valid version/contract settings fails to boot here.
+    """
+    mount_service_meta(app, settings.build_service_meta(), prefix=settings.API_PREFIX)
+
+
 def create_app(
     settings: ConsumerServiceSettings,
     router: APIRouter,
@@ -363,6 +375,7 @@ def create_app(
     _register_health_route(
         app, settings.API_PREFIX, checks, h, authorize, service_name, service_version
     )
+    _register_meta_routes(app, settings)
     app.include_router(router)
     logger.info(
         "fastapi-m8 %s svc=%s v=%s sdk=%s",

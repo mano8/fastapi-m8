@@ -95,6 +95,11 @@ BASE_KWARGS: dict = {
     "AUTH_SERVICE_ROLE": "consumer",
     "TOKEN_MODE": "stateless",
     "AUTH_PREFIX": "/auth",
+    # Service/contract metadata (required → /meta fails closed at boot).
+    "SERVICE_VERSION": "1.0.0",
+    "API_VERSION": "v1",
+    "CONTRACT_VERSION": "1.0",
+    "CONTRACT_RANGE": ">=1.0.0 <2.0.0",
 }
 
 _VALID_UUID = "550e8400-e29b-41d4-a716-446655440000"
