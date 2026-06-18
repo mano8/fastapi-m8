@@ -23,7 +23,7 @@ from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
 from auth_sdk_m8.schemas.meta import ServiceContract, ServiceMeta
-from pydantic import Field, field_validator
+from pydantic import Field
 
 
 class ConsumerServiceSettings(
@@ -41,10 +41,11 @@ class ConsumerServiceSettings(
 
     AUTH_PREFIX: str = "/auth"
     TABLES_PREFIX: str = "app"
-    # Explicit host allowlist for TrustedHostMiddleware.
-    # Empty (default) = middleware not registered (permissive, safe for dev).
-    # In production set to your public hostname(s), e.g. "api.example.com".
-    ALLOWED_HOSTS: list[str] = []
+    # ``ALLOWED_HOSTS`` (host allowlist for TrustedHostMiddleware) is owned by
+    # ``CommonSettings`` (auth-sdk-m8) — the single source of truth. Unset/empty
+    # (default ``None``) = middleware not registered (permissive, safe for dev);
+    # in production set your public hostname(s), e.g. "api.example.com". Its
+    # production/strict gating lives in ``check_config_health``.
 
     # Response security-header knobs (SECURITY_HEADERS_ENABLED, HSTS_ENABLED,
     # HSTS_MAX_AGE, HSTS_INCLUDE_SUBDOMAINS, CONTENT_SECURITY_POLICY_ENABLED,
@@ -100,11 +101,3 @@ class ConsumerServiceSettings(
                 range=self.CONTRACT_RANGE,
             ),
         )
-
-    @field_validator("ALLOWED_HOSTS", mode="before")
-    @classmethod
-    def _parse_allowed_hosts(cls, v: object) -> list[str]:
-        """Accept a comma-separated string or list from the environment."""
-        if isinstance(v, str):
-            return [h.strip() for h in v.split(",") if h.strip()]
-        return list(v) if v else []  # type: ignore[call-overload]

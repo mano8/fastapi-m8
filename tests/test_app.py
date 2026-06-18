@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from asgi_lifespan import LifespanManager
+from auth_sdk_m8.core.exceptions import ConfigurationError
 from fastapi import APIRouter
 from httpx import ASGITransport, AsyncClient
 
@@ -232,6 +233,93 @@ async def test_startup_validator_fail_prevents_ready(test_router: APIRouter) -> 
         async with a.router.lifespan_context(a):
             pass
     assert a.state.service_ready is False
+
+
+# ── Auto config-health (item 1.1) ─────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_config_health_blocks_lifespan_on_production_localhost_cors(
+    test_router: APIRouter,
+) -> None:
+    """Production localhost CORS origins fail config-health during lifespan."""
+    a = create_app(
+        make_settings(
+            **_BASE, ENVIRONMENT="production", ALLOWED_HOSTS=["api.example.com"]
+        ),
+        test_router,
+    )
+    with pytest.raises(ConfigurationError):
+        async with a.router.lifespan_context(a):
+            pass
+    assert a.state.service_ready is False
+
+
+@pytest.mark.anyio
+async def test_config_health_blocks_lifespan_on_strict_wildcard_hosts(
+    test_router: APIRouter,
+) -> None:
+    """A wildcard ALLOWED_HOSTS under strict mode fails config-health."""
+    a = create_app(
+        make_settings(
+            **_BASE,
+            ENVIRONMENT="production",
+            STRICT_PRODUCTION_MODE=True,
+            ALLOWED_HOSTS=["*"],
+            BACKEND_CORS_ORIGINS="https://app.example.com",
+            FRONTEND_HOST="https://app.example.com",
+        ),
+        test_router,
+    )
+    with pytest.raises(ConfigurationError):
+        async with a.router.lifespan_context(a):
+            pass
+    assert a.state.service_ready is False
+
+
+@pytest.mark.anyio
+async def test_user_validators_skipped_when_config_health_fails(
+    test_router: APIRouter,
+) -> None:
+    """A caller validator never runs when config-health fails first."""
+    ran: list[str] = []
+
+    async def user_validator() -> None:
+        ran.append("user")
+
+    a = create_app(
+        make_settings(
+            **_BASE, ENVIRONMENT="production", ALLOWED_HOSTS=["api.example.com"]
+        ),
+        test_router,
+        lifecycle=AppLifecycle(startup_validators=[user_validator]),
+    )
+    with pytest.raises(ConfigurationError):
+        async with a.router.lifespan_context(a):
+            pass
+    assert ran == []
+
+
+@pytest.mark.anyio
+async def test_config_health_runs_before_user_validators(
+    test_router: APIRouter,
+) -> None:
+    """Config-health is prepended: it runs, then caller validators, in order."""
+    order: list[str] = []
+
+    async def user_validator() -> None:
+        # service_ready is still False — startup has not completed yet.
+        order.append("user")
+
+    a = create_app(
+        make_settings(**_BASE),
+        test_router,
+        lifecycle=AppLifecycle(startup_validators=[user_validator]),
+    )
+    async with a.router.lifespan_context(a):
+        order.append("ready")
+    assert order == ["user", "ready"]
+    assert a.state.service_ready is True
 
 
 # ── Lifespan teardown ─────────────────────────────────────────────────────────

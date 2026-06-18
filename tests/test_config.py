@@ -52,9 +52,9 @@ def test_allowed_hosts_parsed_from_string() -> None:
 
 
 def test_allowed_hosts_empty_by_default() -> None:
-    """ALLOWED_HOSTS defaults to an empty list (middleware not registered)."""
+    """ALLOWED_HOSTS defaults to None (inherited from CommonSettings; unset)."""
     s = make_settings()
-    assert s.ALLOWED_HOSTS == []
+    assert s.ALLOWED_HOSTS is None
 
 
 def test_event_stream_timeouts_default() -> None:

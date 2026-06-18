@@ -7,6 +7,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ## [Unreleased]
 
+### Added
+
+- `create_app` now **auto-runs the shared `check_config_health()`** (from
+  `auth_sdk_m8.core.config`) as an internal startup validator, **prepended** to any
+  caller-provided `startup_validators`. It runs inside the lifespan (not at import time),
+  so a fatal misconfiguration (e.g. production `localhost` CORS origins, a wildcard
+  `ALLOWED_HOSTS` under strict mode) aborts startup with `ConfigurationError` **before**
+  user validators run and before the service is marked ready. Consumers now get the same
+  production safety checks the auth service already runs, automatically.
+
+### Changed
+
+- `ALLOWED_HOSTS` is no longer redefined on `ConsumerServiceSettings` — it is inherited
+  from `CommonSettings` (auth-sdk-m8), the single source of truth. The default is now
+  `None` (unset) rather than `[]`; both are falsy, so `TrustedHostMiddleware` is still
+  skipped when unset. Production/strict gating lives in `check_config_health`.
+
 ---
 
 ## [2.0.0] — 2026-06-16 · Auto-mounted `/meta` + `/ping`; required service metadata

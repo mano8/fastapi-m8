@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import anyio
 from auth_sdk_m8.controllers.meta import mount_service_meta
+from auth_sdk_m8.core.config import check_config_health
 from auth_sdk_m8.security.headers import add_security_headers_middleware
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -144,6 +145,23 @@ def _build_lifespan(
         await _teardown()
 
     return lifespan
+
+
+def _build_config_health_validator(
+    settings: ConsumerServiceSettings,
+) -> StartupValidator:
+    """
+    Return a startup validator running the shared ``check_config_health``.
+
+    The validator runs inside the lifespan (not at import time) and raises
+    ``ConfigurationError`` on fatal misconfiguration, aborting startup before
+    any caller-provided validators run.
+    """
+
+    async def _validate_config_health() -> None:
+        check_config_health(settings, logger)
+
+    return _validate_config_health
 
 
 def _add_metrics_middleware(app: FastAPI, settings: ConsumerServiceSettings) -> None:
@@ -360,9 +378,13 @@ def create_app(
     h = health or HealthConfig()
     lc = lifecycle or AppLifecycle()
     checks = list(h.checks or [])
+    startup_validators = [
+        _build_config_health_validator(settings),
+        *(lc.startup_validators or []),
+    ]
     app = FastAPI(
         lifespan=_build_lifespan(
-            lc.auth_deps, lc.db_engine, lc.startup_validators, lc.lifespan_extras
+            lc.auth_deps, lc.db_engine, startup_validators, lc.lifespan_extras
         ),
         **_openapi_config(settings, service_name, service_version),
     )
