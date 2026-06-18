@@ -9,6 +9,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ### Added
 
+- **`_FILE` secret mounts for consumers** (security remediation 6.1). Documented and
+  regression-tested that `ConsumerServiceSettings` inherits the Docker/K8s
+  `<FIELD>_FILE` convention from `auth-sdk-m8`'s `CommonSettings` — no consumer code
+  change. Any secret can be mounted from a file via `<FIELD>_FILE` (e.g.
+  `DB_PASSWORD_FILE`, `PRIVATE_API_SECRET_FILE`, `METRICS_SCRAPE_CREDENTIAL_FILE`)
+  pointing under `/run/secrets/*`, so the production overlay keeps plaintext secrets
+  out of env files. The mount outranks plaintext `.env`/env values but not explicit
+  constructor kwargs; a missing file fails closed at construction; file-sourced
+  `SecretStr` values stay masked in `repr`. Coverage spans consumer-declared
+  (`METRICS_SCRAPE_CREDENTIAL`), `ConsumerAuthMixin` (`PRIVATE_API_SECRET`), and
+  `CommonSettings` (`DB_PASSWORD`) fields.
 - **Revocation-cache observability** (security remediation 7.x.2). The consumer-side
   JTI revocation cache now emits best-effort Prometheus metrics on the shared
   `auth-sdk-m8[observability]` registry: `revocation_cache_lookups_total{result="hit"|"miss"}`

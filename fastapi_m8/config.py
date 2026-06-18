@@ -37,6 +37,16 @@ class ConsumerServiceSettings(
     ``PRIVATE_API_SECRET`` from ``ConsumerAuthMixin``, and all common
     fields (``SECRET_KEY``, ``TOKEN_MODE``, ``ALLOWED_ORIGINS``,
     ``SQLALCHEMY_DATABASE_URI``, ``API_PREFIX``, …) from ``CommonSettings``.
+
+    **Secret files (`_FILE` mounts).** ``settings_customise_sources`` is inherited
+    from ``CommonSettings``, so every secret field — including consumer-declared
+    ones like ``METRICS_SCRAPE_CREDENTIAL`` — can be sourced from a mounted file by
+    setting ``<FIELD>_FILE`` (e.g. ``DB_PASSWORD_FILE``, ``PRIVATE_API_SECRET_FILE``,
+    ``METRICS_SCRAPE_CREDENTIAL_FILE``) to a path under ``/run/secrets/*``. The file
+    mount outranks plaintext ``.env``/env values but not explicit constructor
+    kwargs, and a missing file fails closed at construction. This lets the
+    production overlay keep plaintext secrets out of env files with no consumer
+    code change (security remediation 6.1).
     """
 
     AUTH_PREFIX: str = "/auth"
