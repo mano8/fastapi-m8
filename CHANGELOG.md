@@ -9,6 +9,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ### Added
 
+- **Revocation-cache observability** (security remediation 7.x.2). The consumer-side
+  JTI revocation cache now emits best-effort Prometheus metrics on the shared
+  `auth-sdk-m8[observability]` registry: `revocation_cache_lookups_total{result="hit"|"miss"}`
+  and a `revocation_cache_ttl_seconds` gauge for the configured stale-window TTL. Emission
+  is zero-cost when observability is disabled or the extra is absent. Metrics carry **no
+  JTI, user ID, or secret** as a label or value, and cache construction logs the TTL only
+  (never the introspection URL or secret) — satisfying the "keys/secrets are never logged"
+  acceptance criterion. The SDK owns the event-stream signals (connected/gap/reconnect);
+  this is the consumer cache hit/miss + TTL side.
 - `create_app` now **auto-runs the shared `check_config_health()`** (from
   `auth_sdk_m8.core.config`) as an internal startup validator, **prepended** to any
   caller-provided `startup_validators`. It runs inside the lifespan (not at import time),

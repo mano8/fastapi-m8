@@ -202,6 +202,154 @@ async def test_no_cache_when_ttl_zero() -> None:
     await client.close()
 
 
+# ── Revocation-cache observability (item 7.x.2) ───────────────────────────────
+
+
+@pytest.fixture
+def fresh_metrics(monkeypatch):
+    """Isolate observability state: fresh registry, metrics enabled, clean cache.
+
+    Restores the real ``REGISTRY``/``_m`` and resets the module-level metric
+    cache afterwards so no metric registration leaks across tests.
+    """
+    from auth_sdk_m8.observability import metrics as obs_mod
+    from prometheus_client import CollectorRegistry
+
+    import fastapi_m8._revocation as rev_mod
+
+    fresh = CollectorRegistry(auto_describe=False)
+    monkeypatch.setattr(obs_mod, "REGISTRY", fresh)
+    monkeypatch.setattr(obs_mod, "_m", None)
+    monkeypatch.setattr(rev_mod, "_cache_metrics", None)
+    obs_mod.setup(enabled=True, groups_str="auth", api_prefix="")
+    return obs_mod
+
+
+@pytest.fixture
+def disabled_metrics(monkeypatch):
+    """Observability disabled: ``metrics.get()`` returns ``None``."""
+    from auth_sdk_m8.observability import metrics as obs_mod
+
+    import fastapi_m8._revocation as rev_mod
+
+    monkeypatch.setattr(obs_mod, "_m", None)
+    monkeypatch.setattr(rev_mod, "_cache_metrics", None)
+    return obs_mod
+
+
+def _sv(registry, name: str, labels: dict | None = None) -> float:
+    return registry.get_sample_value(name, labels) or 0.0
+
+
+@pytest.mark.anyio
+async def test_cache_hit_records_hit_metric_and_ttl(fresh_metrics) -> None:
+    """A cache hit increments the hit counter and publishes the TTL gauge."""
+    client = _make_client(cache_ttl=30)
+    assert client._cache is not None
+    client._cache.put("jti-cached", "user-1")
+    setattr(client._client, "post", AsyncMock())
+
+    assert await client.is_revoked("jti-cached", user_id="user-1") is False
+    reg = fresh_metrics.REGISTRY
+    assert _sv(reg, "revocation_cache_lookups_total", {"result": "hit"}) == 1.0
+    assert _sv(reg, "revocation_cache_lookups_total", {"result": "miss"}) == 0.0
+    assert _sv(reg, "revocation_cache_ttl_seconds") == 30.0
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_cache_miss_records_miss_metric(fresh_metrics) -> None:
+    """A cache miss increments the miss counter (then the HTTP call runs)."""
+    client = _make_client(cache_ttl=30)
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {"active": True}
+    setattr(client._client, "post", AsyncMock(return_value=mock_resp))
+
+    assert await client.is_revoked("jti-new", user_id="user-1") is False
+    reg = fresh_metrics.REGISTRY
+    assert _sv(reg, "revocation_cache_lookups_total", {"result": "miss"}) == 1.0
+    assert _sv(reg, "revocation_cache_lookups_total", {"result": "hit"}) == 0.0
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_ttl_zero_records_no_lookup_metric(fresh_metrics) -> None:
+    """With caching disabled (ttl=0) no lookup metric is ever emitted."""
+    client = _make_client(cache_ttl=0)
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {"active": True}
+    setattr(client._client, "post", AsyncMock(return_value=mock_resp))
+
+    assert await client.is_revoked("jti-x", user_id="user-1") is False
+    reg = fresh_metrics.REGISTRY
+    assert _sv(reg, "revocation_cache_lookups_total", {"result": "hit"}) == 0.0
+    assert _sv(reg, "revocation_cache_lookups_total", {"result": "miss"}) == 0.0
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_metrics_disabled_is_noop(disabled_metrics) -> None:
+    """When observability is disabled the cache still works and emits nothing."""
+    from fastapi_m8._revocation import _get_cache_metrics
+
+    client = _make_client(cache_ttl=30)
+    assert client._cache is not None
+    client._cache.put("jti-cached", "user-1")
+    setattr(client._client, "post", AsyncMock())
+
+    assert await client.is_revoked("jti-cached", user_id="user-1") is False
+    assert _get_cache_metrics() is None
+    await client.close()
+
+
+def test_get_cache_metrics_idempotent(fresh_metrics) -> None:
+    """Repeated calls reuse the same metric objects on a stable registry."""
+    from fastapi_m8._revocation import _get_cache_metrics
+
+    first = _get_cache_metrics()
+    second = _get_cache_metrics()
+    assert first is not None
+    assert first is second
+
+
+@pytest.mark.anyio
+async def test_no_jti_or_secret_in_metrics_output(fresh_metrics) -> None:
+    """Acceptance: rendered metrics carry no JTI, user ID, or secret."""
+    client = _make_client(cache_ttl=30)
+    assert client._cache is not None
+    client._cache.put("jti-secret-value", "user-secret-value")
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {"active": True}
+    setattr(client._client, "post", AsyncMock(return_value=mock_resp))
+
+    await client.is_revoked("jti-secret-value", user_id="user-secret-value")
+    await client.is_revoked("jti-fresh-value", user_id="user-secret-value")
+
+    body, _ = fresh_metrics.render()
+    text = body.decode()
+    assert "jti-secret-value" not in text
+    assert "jti-fresh-value" not in text
+    assert "user-secret-value" not in text
+    assert _SECRET not in text
+    # Only the result dimension is exported (hit/miss), never an identifier.
+    assert "result=" in text
+    await client.close()
+
+
+def test_cache_enabled_logs_ttl_without_secret(caplog) -> None:
+    """Construction logs the configured TTL only — never the secret or URL."""
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="fastapi_m8._revocation"):
+        client = _make_client(cache_ttl=45)
+    assert "revocation.cache enabled ttl_seconds=45" in caplog.text
+    assert _SECRET not in caplog.text
+    assert client._cache is not None
+
+
 def test_evict_jti_delegates_to_cache() -> None:
     """evict_jti forwards to the cache when enabled."""
     client = _make_client(cache_ttl=30)
