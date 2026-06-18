@@ -23,7 +23,7 @@ from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
 from auth_sdk_m8.schemas.meta import ServiceContract, ServiceMeta
-from pydantic import Field
+from pydantic import Field, SecretStr
 
 
 class ConsumerServiceSettings(
@@ -66,6 +66,20 @@ class ConsumerServiceSettings(
     # Set to e.g. 30 to cache active=True results for 30 s; stream events evict
     # by JTI/user, an unresumable gap flushes all (requires event stream client).
     REVOCATION_CACHE_TTL_SECONDS: int = Field(0, ge=0)
+
+    # Metrics scrape credential for the ``/metrics`` endpoint (auth-sdk-m8 guard 1.4).
+    # Unset (default) = network-isolation only; ``/metrics`` answers without auth.
+    # Set to a long-lived static secret and configure Prometheus
+    # ``scrape_configs.authorization.credentials`` to match — guards are
+    # constant-time via ``auth_sdk_m8.security.guards.make_scrape_credential_guard``.
+    METRICS_SCRAPE_CREDENTIAL: SecretStr | None = Field(
+        None,
+        description=(
+            "Optional static bearer credential for the /metrics scrape endpoint. "
+            "When set, requests must present Authorization: Bearer <value>. "
+            "When unset, /metrics relies on network isolation only."
+        ),
+    )
 
     # Service/contract metadata served at ``{API_PREFIX}/meta`` (see
     # auth_sdk_m8.controllers.meta). These are **required** so every consumer

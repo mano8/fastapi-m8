@@ -9,6 +9,7 @@ from asgi_lifespan import LifespanManager
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from fastapi_m8 import AppLifecycle, HealthConfig, create_app
 from tests.conftest import make_settings
@@ -234,6 +235,81 @@ def test_hsts_disabled_when_max_age_zero() -> None:
     resp = client.get("/api/health/")
     assert "strict-transport-security" not in resp.headers
     assert "content-security-policy" in resp.headers
+
+
+# ── Metrics guard (1.4) ──────────────────────────────────────────────────────
+
+
+def test_metrics_route_absent_when_metrics_disabled() -> None:
+    """METRICS_ENABLED=False → /metrics not registered (404)."""
+    app = create_app(make_settings(**_BASE), _router())
+    resp = TestClient(app, raise_server_exceptions=False).get("/metrics")
+    assert resp.status_code == 404
+
+
+def test_metrics_route_accessible_without_credential() -> None:
+    """METRICS_ENABLED=True + no credential → /metrics 200 without auth."""
+    s = make_settings(**_BASE, METRICS_ENABLED=True)
+    with (
+        patch("auth_sdk_m8.observability.metrics.setup"),
+        patch(
+            "auth_sdk_m8.observability.metrics.render",
+            return_value=(b"# metrics\n", "text/plain"),
+        ),
+    ):
+        app = create_app(s, _router())
+        resp = TestClient(app, raise_server_exceptions=False).get("/metrics")
+    assert resp.status_code == 200
+
+
+def test_metrics_route_rejects_missing_bearer_when_credential_set() -> None:
+    """METRICS_ENABLED=True + credential set → 401 with no auth header."""
+    s = make_settings(
+        **_BASE,
+        METRICS_ENABLED=True,
+        METRICS_SCRAPE_CREDENTIAL=SecretStr("scrape-secret"),
+    )
+    with patch("auth_sdk_m8.observability.metrics.setup"):
+        app = create_app(s, _router())
+        resp = TestClient(app, raise_server_exceptions=False).get("/metrics")
+    assert resp.status_code == 401
+    assert resp.headers["www-authenticate"] == "Bearer"
+
+
+def test_metrics_route_accepts_correct_bearer() -> None:
+    """METRICS_ENABLED=True + correct Bearer → 200."""
+    s = make_settings(
+        **_BASE,
+        METRICS_ENABLED=True,
+        METRICS_SCRAPE_CREDENTIAL=SecretStr("scrape-secret"),
+    )
+    with (
+        patch("auth_sdk_m8.observability.metrics.setup"),
+        patch(
+            "auth_sdk_m8.observability.metrics.render",
+            return_value=(b"# metrics\n", "text/plain"),
+        ),
+    ):
+        app = create_app(s, _router())
+        resp = TestClient(app, raise_server_exceptions=False).get(
+            "/metrics", headers={"Authorization": "Bearer scrape-secret"}
+        )
+    assert resp.status_code == 200
+
+
+def test_metrics_route_rejects_wrong_bearer() -> None:
+    """METRICS_ENABLED=True + wrong Bearer → 401."""
+    s = make_settings(
+        **_BASE,
+        METRICS_ENABLED=True,
+        METRICS_SCRAPE_CREDENTIAL=SecretStr("scrape-secret"),
+    )
+    with patch("auth_sdk_m8.observability.metrics.setup"):
+        app = create_app(s, _router())
+        resp = TestClient(app, raise_server_exceptions=False).get(
+            "/metrics", headers={"Authorization": "Bearer wrong"}
+        )
+    assert resp.status_code == 401
 
 
 def test_hsts_without_include_subdomains() -> None:

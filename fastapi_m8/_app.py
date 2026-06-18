@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import secrets
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -19,10 +18,14 @@ from typing import TYPE_CHECKING, Any
 import anyio
 from auth_sdk_m8.controllers.meta import mount_service_meta
 from auth_sdk_m8.core.config import check_config_health
+from auth_sdk_m8.security.guards import (
+    make_internal_token_authorizer,
+    make_scrape_credential_guard,
+)
 from auth_sdk_m8.security.headers import add_security_headers_middleware
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from fastapi_m8._compat import _COMPAT_STATE, _assert_compat
@@ -190,16 +193,37 @@ def _build_default_authorizer(
 ) -> Callable[[Request], bool]:
     """Return a token authorizer closed over the private API secret."""
     sec = settings.PRIVATE_API_SECRET
+    return make_internal_token_authorizer(sec.get_secret_value() if sec else None)
 
-    def _authorizer(request: Request) -> bool:
-        if not sec:
-            return False
-        return secrets.compare_digest(
-            request.headers.get("X-Internal-Token", ""),
-            sec.get_secret_value(),
+
+def _register_metrics_route(app: FastAPI, settings: ConsumerServiceSettings) -> None:
+    """
+    Register ``/metrics`` with an optional scrape-credential guard (1.4).
+
+    The route is only wired when ``METRICS_ENABLED=True``.  When
+    ``METRICS_SCRAPE_CREDENTIAL`` is unset the guard is a no-op and the network
+    boundary (internal entrypoint) remains the sole control.  When set, requests
+    must present ``Authorization: Bearer <credential>`` (constant-time match).
+    """
+    if not settings.METRICS_ENABLED:
+        return
+    cred_field = settings.METRICS_SCRAPE_CREDENTIAL
+    guard = make_scrape_credential_guard(
+        cred_field.get_secret_value() if cred_field else None
+    )
+    try:
+        from auth_sdk_m8.observability import metrics as _obs  # noqa: PLC0415
+    except ImportError:  # pragma: no cover
+        logger.warning(
+            "METRICS_ENABLED but auth-sdk-m8[observability] missing; "
+            "skipping /metrics route"
         )
+        return
 
-    return _authorizer
+    @app.get("/metrics", include_in_schema=False, dependencies=[Depends(guard)])
+    def _metrics_endpoint() -> Response:
+        data, content_type = _obs.render()
+        return Response(content=data, media_type=content_type)
 
 
 async def _gather_health_results(
@@ -393,6 +417,7 @@ def create_app(
     _add_trusted_host_middleware(app, settings)
     add_security_headers_middleware(app, settings)
     _add_metrics_middleware(app, settings)
+    _register_metrics_route(app, settings)
     authorize = h.detail_authorizer or _build_default_authorizer(settings)
     _register_health_route(
         app, settings.API_PREFIX, checks, h, authorize, service_name, service_version
