@@ -56,7 +56,7 @@ health checks; the framework wires the rest.
 | CORS | Auto-wired from `settings.ALLOWED_ORIGINS` |
 | Metrics middleware | Optional; toggled via `METRICS_ENABLED` |
 | Health endpoint | `GET {API_PREFIX}/health/` with optional detail gating |
-| Service meta + liveness | Auto-mounted `GET {API_PREFIX}/meta` + `GET /ping` (fail-closed at boot) |
+| Service meta + liveness | Auto-mounted `GET {API_PREFIX}/meta` + `GET /ping` (also `GET {API_PREFIX}/ping`; fail-closed at boot) |
 | Database lifecycle | `create_db_engine()` wrapping SQLAlchemy |
 | Startup validation | `startup_validators` list runs before app signals ready |
 | Lifespan management | Auth teardown + DB pool dispose on shutdown |
@@ -300,9 +300,14 @@ environment variable.
 
 `create_app` auto-mounts the shared service triad from `auth-sdk-m8`: `GET {API_PREFIX}/meta`
 (cacheable service/version/contract identity, read by clients pre-auth to assert compatibility)
-and a prefix-independent `GET /ping` (dependency-free liveness → `{"status": "ok"}`). The `/meta`
-values are sourced from these settings, so a consumer **fails closed at boot** if it doesn't
-declare its identity. Keep both separate from a dependency-aware `/health` readiness probe.
+and a dependency-free `GET /ping` liveness probe (→ `{"status": "ok"}`). `/ping` is mounted at
+**both** the root (so direct container/sidecar probes stay independent of the app's prefix config)
+and at `{API_PREFIX}/ping` (so liveness stays reachable behind a prefix-routing reverse proxy such
+as Traefik, which forwards only `PathPrefix({API_PREFIX})` — a root-only `/ping` would 404 at the
+gateway). The prefixed copy is hidden from the schema, so OpenAPI still lists a single `ping`
+operation. The `/meta` values are sourced from these settings, so a consumer **fails closed at
+boot** if it doesn't declare its identity. Keep both separate from a dependency-aware `/health`
+readiness probe.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|

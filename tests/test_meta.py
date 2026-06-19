@@ -86,6 +86,26 @@ async def test_ping_route_is_prefix_independent() -> None:
     assert resp.json() == {"status": "ok"}
 
 
+@pytest.mark.anyio
+async def test_ping_route_is_reachable_under_prefix() -> None:
+    """{API_PREFIX}/ping is mounted too, so liveness survives a prefix-routing proxy."""
+    s = make_settings(**_BASE)  # API_PREFIX=/api
+    app = create_app(s, _router())
+    async with live_client(app) as client:
+        resp = await client.get("/api/ping")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_ping_schema_carries_single_operation() -> None:
+    """Both /ping copies are served, but the prefixed one is hidden from the schema."""
+    s = make_settings(**_BASE)  # API_PREFIX=/api
+    app = create_app(s, _router())
+    paths = app.openapi()["paths"]
+    ping_paths = [p for p in paths if p.endswith("/ping")]
+    assert ping_paths == ["/ping"]
+
+
 # ── Fail-closed at boot ───────────────────────────────────────────────────────
 
 

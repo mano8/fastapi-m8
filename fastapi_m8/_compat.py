@@ -42,6 +42,13 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # at boot). Requires auth-sdk-m8 1.4.0, which ships mount_service_meta +
     # ServiceMeta — see CHANGELOG. BREAKING: consumers must declare their meta.
     "2.0": {"auth-sdk-m8": ">=1.4.0,<2.0.0"},
+    # 2.1 requires auth-sdk-m8 1.5.0, where mount_service_meta dual-mounts /ping:
+    # the unchanged root /ping plus a {API_PREFIX}/ping copy so liveness stays
+    # reachable behind a prefix-routing reverse proxy (Traefik forwards only
+    # PathPrefix({API_PREFIX}), so a root-only /ping 404s at the gateway). The
+    # create_app call site is unchanged — it already passes prefix=API_PREFIX — so
+    # the prefixed probe is picked up automatically on upgrade. See CHANGELOG.
+    "2.1": {"auth-sdk-m8": ">=1.5.0,<2.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"

@@ -5,10 +5,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [Unreleased]
+## [2.1.0] — 2026-06-19 · Security-remediation hardening + proxy-routable `{API_PREFIX}/ping`
+
+> **Requires `auth-sdk-m8 >= 1.5.0`** — `mount_service_meta` dual-mounts `/ping`.
 
 ### Added
 
+- **Proxy-routable `/ping`** picked up from `auth-sdk-m8 1.5.0`. `mount_service_meta`
+  now dual-mounts the liveness probe: the unchanged root `GET /ping` **plus** a
+  `GET {API_PREFIX}/ping` copy. `create_app` already passes `prefix=API_PREFIX`, so
+  the prefixed probe appears automatically with **no call-site change** — liveness
+  now resolves behind a prefix-routing reverse proxy (Traefik forwards only
+  `PathPrefix({API_PREFIX})`, so the root-only `/ping` previously 404'd at the
+  gateway while `{API_PREFIX}/meta` resolved). The prefixed copy is
+  `include_in_schema=False`, so OpenAPI still carries a single `ping` operation.
 - **`_FILE` secret mounts for consumers** (security remediation 6.1). Documented and
   regression-tested that `ConsumerServiceSettings` inherits the Docker/K8s
   `<FIELD>_FILE` convention from `auth-sdk-m8`'s `CommonSettings` — no consumer code
@@ -39,6 +49,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ### Changed
 
+- **Requires `auth-sdk-m8 >= 1.5.0`** (was `>= 1.4.0`). The dependency floor and the
+  `COMPAT_MATRIX` `2.1` entry are bumped so the dual-mounted `{API_PREFIX}/ping` is
+  guaranteed present; on `auth-sdk-m8 1.4.0` only the root `/ping` exists.
 - `ALLOWED_HOSTS` is no longer redefined on `ConsumerServiceSettings` — it is inherited
   from `CommonSettings` (auth-sdk-m8), the single source of truth. The default is now
   `None` (unset) rather than `[]`; both are falsy, so `TrustedHostMiddleware` is still
