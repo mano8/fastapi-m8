@@ -52,13 +52,15 @@ health checks; the framework wires the rest.
 |---|---|
 | JWT validation | `build_auth_deps()` + `auth-sdk-m8` validator |
 | Role-based access control | `AuthDeps.get_current_active_admin / _superuser` |
-| Token revocation (stateful mode) | `RemoteRevocationClient` → `fa-auth-m8` private API |
+| Token revocation (stateful mode) | `RemoteRevocationClient` → `fa-auth-m8` private API (optional short-TTL cache via `REVOCATION_CACHE_TTL_SECONDS`) |
+| Auth event stream (optional) | `build_event_stream_client()` → fa-auth SSE bridge for best-effort cache eviction |
 | CORS | Auto-wired from `settings.ALLOWED_ORIGINS` |
-| Metrics middleware | Optional; toggled via `METRICS_ENABLED` |
+| Metrics middleware + `/metrics` | Optional; toggled via `METRICS_ENABLED`, scrape-gated via `METRICS_SCRAPE_CREDENTIAL` |
+| Response security headers | Tiered hardening from `auth-sdk-m8` (HSTS/CSP express opt-in) |
 | Health endpoint | `GET {API_PREFIX}/health/` with optional detail gating |
 | Service meta + liveness | Auto-mounted `GET {API_PREFIX}/meta` + `GET /ping` (also `GET {API_PREFIX}/ping`; fail-closed at boot) |
 | Database lifecycle | `create_db_engine()` wrapping SQLAlchemy |
-| Startup validation | `startup_validators` list runs before app signals ready |
+| Startup validation | Auto-run `check_config_health()` + caller `startup_validators` before app signals ready |
 | Lifespan management | Auth teardown + DB pool dispose on shutdown |
 
 **What it is NOT:**
@@ -353,6 +355,8 @@ Required only when `TOKEN_MODE=stateful` and `AUTH_SERVICE_ROLE=consumer`.
 |---|---|---|---|
 | `INTROSPECTION_URL` | Yes | — | `POST` endpoint on auth service for JTI revocation checks, e.g. `http://auth_user_service:8000/user/private/v1/jti-status` |
 | `PRIVATE_API_SECRET` | Yes | — | Shared secret for `X-Internal-Token` header (must match auth service) |
+| `ACCESS_REVOCATION_FAILURE_MODE` | No | `fail_closed` | `fail_closed` (default, secure — reject tokens when the check is unverifiable) or `fail_open` (accept on network/HTTP error). |
+| `REVOCATION_CACHE_TTL_SECONDS` | No | `0` | Short-TTL positive validation cache. `0` (default) disables it — every request calls fa-auth. Set to e.g. `30` to trust an `active=True` result for 30 s, skipping the HTTP round-trip; stream events (`session-revoked`/`user-deleted`) evict affected entries and an unresumable gap flushes all (requires the event-stream client). |
 
 ### Auth Event Stream (fa-auth SSE bridge)
 
@@ -441,8 +445,17 @@ do not connect to Redis directly.
 
 | Variable | Default | Description |
 |---|---|---|
-| `METRICS_ENABLED` | `false` | Enable Prometheus metrics middleware |
+| `METRICS_ENABLED` | `false` | Enable Prometheus metrics middleware and the `/metrics` route |
 | `METRICS_GROUPS` | — | Comma-separated groups: `traffic`, `performance`, `reliability`, `health`, `auth`, or `all` |
+| `METRICS_SCRAPE_CREDENTIAL` | — | Optional static bearer credential for the `/metrics` scrape endpoint. When set, requests must present `Authorization: Bearer <value>` (constant-time match). When unset, `/metrics` relies on network isolation only. |
+
+> **`/metrics` route:** when `METRICS_ENABLED=true`, `create_app` also registers a
+> `GET /metrics` endpoint (hidden from the schema) rendering the Prometheus registry.
+> Set `METRICS_SCRAPE_CREDENTIAL` to gate scrapes with a bearer credential — configure
+> Prometheus `scrape_configs.authorization.credentials` to match. The revocation cache
+> (when enabled) also emits `revocation_cache_lookups_total{result="hit"|"miss"}` and a
+> `revocation_cache_ttl_seconds` gauge on the same registry; no JTI, user ID, or secret
+> is ever used as a label or value.
 
 ### OpenAPI / Docs
 
@@ -560,7 +573,11 @@ app = create_app(
 
 **Lifespan sequence:**
 
-1. Run `lifecycle.startup_validators` — raise any exception to prevent ready signal.
+1. Run the auto-prepended `check_config_health()` validator (from `auth-sdk-m8`),
+   then `lifecycle.startup_validators` — raise any exception to prevent the ready
+   signal. The config-health check runs first, so a fatal misconfiguration (e.g.
+   production `localhost` CORS origins, a wildcard `ALLOWED_HOSTS` under strict mode)
+   aborts startup with `ConfigurationError` before any caller validators run.
 2. Enter `lifecycle.lifespan_extras` context (if provided).
 3. Set `app.state.service_ready = True`.
 4. *(app serves traffic)*
@@ -625,6 +642,7 @@ Returns a frozen dataclass with everything needed for route protection.
 | `is_active` | `bool` | Account active flag |
 | `is_superuser` | `bool` | Superuser flag |
 | `email_verified` | `bool` | Email verification status |
+| `tenant_id` | `uuid.UUID \| None` | Tenant claim (populated when the token carries `tenant_id`; `None` for untenanted/legacy tokens). Requires `auth-sdk-m8 ≥ 1.3.0`. |
 
 ---
 
@@ -823,8 +841,8 @@ HTTP 200
   ],
   "service": "Item Service",
   "version": "1.0.0",
-  "fastapi_m8": "1.3.0",
-  "auth_sdk_m8": "1.1.x"
+  "fastapi_m8": "2.1.0",
+  "auth_sdk_m8": "1.5.x"
 }
 ```
 
@@ -1075,6 +1093,11 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `2.1.0` | `>=1.5.0, <2.0.0` | 3.11, 3.12, 3.13 |
+| `2.0.0` | `>=1.4.0, <2.0.0` | 3.11, 3.12, 3.13 |
+| `1.6.0` | `>=1.3.0, <2.0.0` | 3.11, 3.12, 3.13 |
+| `1.5.0` | `>=1.2.1, <2.0.0` | 3.11, 3.12, 3.13 |
+| `1.4.0` | `>=1.2.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.3.0` | `>=1.1.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.2.0` | `>=1.0.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.1.4` | `>=0.7.3, <0.8.0` | 3.11, 3.12, 3.13 |
@@ -1090,9 +1113,11 @@ Check at runtime:
 ```python
 from fastapi_m8 import CAPABILITIES, __version__
 
-print(__version__)          # "1.3.0"
-print(CAPABILITIES)         # {"async": False, "db_optional": True, ...}
+print(__version__)          # "2.1.0"
+print(CAPABILITIES)         # {"async": False, "plugin_system": False,
+                            #  "trace_context": False, "db_optional": True,
+                            #  "health_detail_gating": True}
 ```
 
-`create_async_app()` is a planned API stub for v2.0. Calling it raises
-`NotImplementedError`.
+`create_async_app()` is a reserved stub for a future async app surface. Calling it
+raises `NotImplementedError`; check `CAPABILITIES["async"]` before using it.
