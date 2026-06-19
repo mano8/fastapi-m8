@@ -5,7 +5,57 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [Unreleased]
+## [2.1.0] — 2026-06-19 · Security-remediation hardening + proxy-routable `{API_PREFIX}/ping`
+
+> **Requires `auth-sdk-m8 >= 1.5.0`** — `mount_service_meta` dual-mounts `/ping`.
+
+### Added
+
+- **Proxy-routable `/ping`** picked up from `auth-sdk-m8 1.5.0`. `mount_service_meta`
+  now dual-mounts the liveness probe: the unchanged root `GET /ping` **plus** a
+  `GET {API_PREFIX}/ping` copy. `create_app` already passes `prefix=API_PREFIX`, so
+  the prefixed probe appears automatically with **no call-site change** — liveness
+  now resolves behind a prefix-routing reverse proxy (Traefik forwards only
+  `PathPrefix({API_PREFIX})`, so the root-only `/ping` previously 404'd at the
+  gateway while `{API_PREFIX}/meta` resolved). The prefixed copy is
+  `include_in_schema=False`, so OpenAPI still carries a single `ping` operation.
+- **`_FILE` secret mounts for consumers** (security remediation 6.1). Documented and
+  regression-tested that `ConsumerServiceSettings` inherits the Docker/K8s
+  `<FIELD>_FILE` convention from `auth-sdk-m8`'s `CommonSettings` — no consumer code
+  change. Any secret can be mounted from a file via `<FIELD>_FILE` (e.g.
+  `DB_PASSWORD_FILE`, `PRIVATE_API_SECRET_FILE`, `METRICS_SCRAPE_CREDENTIAL_FILE`)
+  pointing under `/run/secrets/*`, so the production overlay keeps plaintext secrets
+  out of env files. The mount outranks plaintext `.env`/env values but not explicit
+  constructor kwargs; a missing file fails closed at construction; file-sourced
+  `SecretStr` values stay masked in `repr`. Coverage spans consumer-declared
+  (`METRICS_SCRAPE_CREDENTIAL`), `ConsumerAuthMixin` (`PRIVATE_API_SECRET`), and
+  `CommonSettings` (`DB_PASSWORD`) fields.
+- **Revocation-cache observability** (security remediation 7.x.2). The consumer-side
+  JTI revocation cache now emits best-effort Prometheus metrics on the shared
+  `auth-sdk-m8[observability]` registry: `revocation_cache_lookups_total{result="hit"|"miss"}`
+  and a `revocation_cache_ttl_seconds` gauge for the configured stale-window TTL. Emission
+  is zero-cost when observability is disabled or the extra is absent. Metrics carry **no
+  JTI, user ID, or secret** as a label or value, and cache construction logs the TTL only
+  (never the introspection URL or secret) — satisfying the "keys/secrets are never logged"
+  acceptance criterion. The SDK owns the event-stream signals (connected/gap/reconnect);
+  this is the consumer cache hit/miss + TTL side.
+- `create_app` now **auto-runs the shared `check_config_health()`** (from
+  `auth_sdk_m8.core.config`) as an internal startup validator, **prepended** to any
+  caller-provided `startup_validators`. It runs inside the lifespan (not at import time),
+  so a fatal misconfiguration (e.g. production `localhost` CORS origins, a wildcard
+  `ALLOWED_HOSTS` under strict mode) aborts startup with `ConfigurationError` **before**
+  user validators run and before the service is marked ready. Consumers now get the same
+  production safety checks the auth service already runs, automatically.
+
+### Changed
+
+- **Requires `auth-sdk-m8 >= 1.5.0`** (was `>= 1.4.0`). The dependency floor and the
+  `COMPAT_MATRIX` `2.1` entry are bumped so the dual-mounted `{API_PREFIX}/ping` is
+  guaranteed present; on `auth-sdk-m8 1.4.0` only the root `/ping` exists.
+- `ALLOWED_HOSTS` is no longer redefined on `ConsumerServiceSettings` — it is inherited
+  from `CommonSettings` (auth-sdk-m8), the single source of truth. The default is now
+  `None` (unset) rather than `[]`; both are falsy, so `TrustedHostMiddleware` is still
+  skipped when unset. Production/strict gating lives in `check_config_health`.
 
 ---
 

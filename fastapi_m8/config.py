@@ -23,7 +23,7 @@ from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
 from auth_sdk_m8.schemas.meta import ServiceContract, ServiceMeta
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr
 
 
 class ConsumerServiceSettings(
@@ -37,14 +37,25 @@ class ConsumerServiceSettings(
     ``PRIVATE_API_SECRET`` from ``ConsumerAuthMixin``, and all common
     fields (``SECRET_KEY``, ``TOKEN_MODE``, ``ALLOWED_ORIGINS``,
     ``SQLALCHEMY_DATABASE_URI``, ``API_PREFIX``, …) from ``CommonSettings``.
+
+    **Secret files (`_FILE` mounts).** ``settings_customise_sources`` is inherited
+    from ``CommonSettings``, so every secret field — including consumer-declared
+    ones like ``METRICS_SCRAPE_CREDENTIAL`` — can be sourced from a mounted file by
+    setting ``<FIELD>_FILE`` (e.g. ``DB_PASSWORD_FILE``, ``PRIVATE_API_SECRET_FILE``,
+    ``METRICS_SCRAPE_CREDENTIAL_FILE``) to a path under ``/run/secrets/*``. The file
+    mount outranks plaintext ``.env``/env values but not explicit constructor
+    kwargs, and a missing file fails closed at construction. This lets the
+    production overlay keep plaintext secrets out of env files with no consumer
+    code change (security remediation 6.1).
     """
 
     AUTH_PREFIX: str = "/auth"
     TABLES_PREFIX: str = "app"
-    # Explicit host allowlist for TrustedHostMiddleware.
-    # Empty (default) = middleware not registered (permissive, safe for dev).
-    # In production set to your public hostname(s), e.g. "api.example.com".
-    ALLOWED_HOSTS: list[str] = []
+    # ``ALLOWED_HOSTS`` (host allowlist for TrustedHostMiddleware) is owned by
+    # ``CommonSettings`` (auth-sdk-m8) — the single source of truth. Unset/empty
+    # (default ``None``) = middleware not registered (permissive, safe for dev);
+    # in production set your public hostname(s), e.g. "api.example.com". Its
+    # production/strict gating lives in ``check_config_health``.
 
     # Response security-header knobs (SECURITY_HEADERS_ENABLED, HSTS_ENABLED,
     # HSTS_MAX_AGE, HSTS_INCLUDE_SUBDOMAINS, CONTENT_SECURITY_POLICY_ENABLED,
@@ -65,6 +76,20 @@ class ConsumerServiceSettings(
     # Set to e.g. 30 to cache active=True results for 30 s; stream events evict
     # by JTI/user, an unresumable gap flushes all (requires event stream client).
     REVOCATION_CACHE_TTL_SECONDS: int = Field(0, ge=0)
+
+    # Metrics scrape credential for the ``/metrics`` endpoint (auth-sdk-m8 guard 1.4).
+    # Unset (default) = network-isolation only; ``/metrics`` answers without auth.
+    # Set to a long-lived static secret and configure Prometheus
+    # ``scrape_configs.authorization.credentials`` to match — guards are
+    # constant-time via ``auth_sdk_m8.security.guards.make_scrape_credential_guard``.
+    METRICS_SCRAPE_CREDENTIAL: SecretStr | None = Field(
+        None,
+        description=(
+            "Optional static bearer credential for the /metrics scrape endpoint. "
+            "When set, requests must present Authorization: Bearer <value>. "
+            "When unset, /metrics relies on network isolation only."
+        ),
+    )
 
     # Service/contract metadata served at ``{API_PREFIX}/meta`` (see
     # auth_sdk_m8.controllers.meta). These are **required** so every consumer
@@ -100,11 +125,3 @@ class ConsumerServiceSettings(
                 range=self.CONTRACT_RANGE,
             ),
         )
-
-    @field_validator("ALLOWED_HOSTS", mode="before")
-    @classmethod
-    def _parse_allowed_hosts(cls, v: object) -> list[str]:
-        """Accept a comma-separated string or list from the environment."""
-        if isinstance(v, str):
-            return [h.strip() for h in v.split(",") if h.strip()]
-        return list(v) if v else []  # type: ignore[call-overload]
