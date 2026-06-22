@@ -49,6 +49,13 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # create_app call site is unchanged — it already passes prefix=API_PREFIX — so
     # the prefixed probe is picked up automatically on upgrade. See CHANGELOG.
     "2.1": {"auth-sdk-m8": ">=1.5.0,<2.0.0"},
+    # 2.2 aligns with auth-sdk-m8 2.0.0, which collapses /ping to a single mount:
+    # when a prefix is set, /ping lives only at {prefix}/ping (no root copy);
+    # when no prefix is set, /ping lives at the root. The single mount is always
+    # in the OpenAPI schema. This is a BREAKING change from the 1.5.x dual-mount;
+    # consumers that relied on root /ping with a prefix must switch to
+    # {API_PREFIX}/ping. See CHANGELOG.
+    "2.2": {"auth-sdk-m8": ">=2.0.0,<3.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"

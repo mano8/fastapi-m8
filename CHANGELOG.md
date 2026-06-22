@@ -5,6 +5,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [2.2.0] — 2026-06-22 · Align with auth-sdk-m8 2.0.0 — single-mount `/ping`
+
+> **Requires `auth-sdk-m8 >= 2.0.0`** — `mount_service_meta` single-mounts `/ping` at the
+> effective prefix. **BREAKING** for callers that relied on a bare root `/ping` when a
+> prefix is configured: switch container/sidecar probes to `{API_PREFIX}/ping`.
+
+### ⚠️ Breaking change — `/ping` is now single-mount
+
+`auth-sdk-m8 2.0.0` removed the dual-mount behaviour introduced in 1.5.0. When `API_PREFIX`
+is set (the normal consumer case), `/ping` is now mounted **only** at `{API_PREFIX}/ping`
+(e.g. `/api/ping`). The root `/ping` no longer exists when a prefix is configured.
+
+- **What was true in 2.1.x:** root `GET /ping` always returned 200 regardless of
+  `API_PREFIX`; additionally `GET {API_PREFIX}/ping` was mounted (schema-hidden copy).
+- **What is true in 2.2.x:** only `GET {API_PREFIX}/ping` exists when a prefix is set;
+  only `GET /ping` (root) when no prefix is set. The single mount is **always in the
+  OpenAPI schema** — it is no longer hidden.
+- **Action required:** update container `livenessProbe` / sidecar healthcheck URLs from
+  `/ping` → `{API_PREFIX}/ping` (e.g. `/api/ping`). No Python code change is needed.
+
+### Changed
+
+- **Requires `auth-sdk-m8 >= 2.0.0, < 3.0.0`** (was `>= 1.5.0, < 2.0.0`). The
+  dependency floor, `COMPAT_MATRIX` `2.2` entry, and `pyproject.toml` pin are updated.
+  auth-sdk-m8 2.0.0 also ships `ConsumerScope` / `ConsumerCredential` /
+  `ConsumerCredentialRegistry` / `make_consumer_authorizer` (Phase 9.1) and the
+  `SECURITY.md` mTLS guidance (Phase 9.2) — available to consumers via the SDK without
+  any fastapi-m8 code change.
+
+---
+
 ## [2.1.0] — 2026-06-19 · Security-remediation hardening + proxy-routable `{API_PREFIX}/ping`
 
 > **Requires `auth-sdk-m8 >= 1.5.0`** — `mount_service_meta` dual-mounts `/ping`.
