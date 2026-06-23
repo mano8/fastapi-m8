@@ -53,11 +53,13 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # collapses to a single mount — when a prefix is set it lives only at
     # {prefix}/ping (no root copy), always in the OpenAPI schema, so consumers
     # that relied on root /ping behind a prefix must switch to {API_PREFIX}/ping;
-    # (2) the required auth-sdk-m8 floor crosses a major (<2.0.0 → >=2.0.0), which
+    # (2) the required auth-sdk-m8 floor crosses a major (<2.0.0 → >=2.0.1), which
     # removed deprecated SDK APIs (Redis bus, decode_access_token, TOKEN_ALGORITHM,
     # module-level settings_customise_sources). Either alone forces this major bump.
-    # See CHANGELOG.
-    "3.0": {"auth-sdk-m8": ">=2.0.0,<3.0.0"},
+    # Floor is >=2.0.1 (not 2.0.0) so the transitive pydantic-settings dep is
+    # >=2.14.2, carrying the SDK 2.0.1 nested-secrets symlink-traversal fix. See
+    # CHANGELOG.
+    "3.0": {"auth-sdk-m8": ">=2.0.1,<3.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"

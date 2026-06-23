@@ -11,7 +11,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 > (1) `mount_service_meta` single-mounts `/ping` at the effective prefix — callers that
 > relied on a bare root `/ping` when a prefix is configured must switch container/sidecar
 > probes to `{API_PREFIX}/ping`; (2) the **required** `auth-sdk-m8` floor crosses a major
-> (`<2.0.0` → `>=2.0.0,<3.0.0`), which removed deprecated SDK APIs — `pip install -U
+> (`<2.0.0` → `>=2.0.1,<3.0.0`), which removed deprecated SDK APIs — `pip install -U
 > fastapi-m8` now force-upgrades the SDK across that major. (Supersedes the never-released
 > 2.2.0 label: the same work, correctly versioned as a major.)
 
@@ -31,8 +31,8 @@ is set (the normal consumer case), `/ping` is now mounted **only** at `{API_PREF
 
 ### Changed
 
-- **Requires `auth-sdk-m8 >= 2.0.0, < 3.0.0`** (was `>= 1.5.0, < 2.0.0`). The
-  dependency floor, `COMPAT_MATRIX` `2.2` entry, and `pyproject.toml` pin are updated.
+- **Requires `auth-sdk-m8 >= 2.0.1, < 3.0.0`** (was `>= 1.5.0, < 2.0.0`). The
+  dependency floor, `COMPAT_MATRIX` `3.0` entry, and `pyproject.toml` pin are updated.
   auth-sdk-m8 2.0.0 also ships `ConsumerScope` / `ConsumerCredential` /
   `ConsumerCredentialRegistry` / `make_consumer_authorizer` (Phase 9.1) and the
   `SECURITY.md` mTLS guidance (Phase 9.2) — available to consumers via the SDK without
@@ -59,6 +59,17 @@ import, or setting changes here — the full suite is green at 100 % against the
 - **Module-level `settings_customise_sources()`**. The `_FILE`/Vault source ordering
   comes from the retained `CommonSettings.settings_customise_sources` **classmethod**
   that `ConsumerServiceSettings` inherits — unchanged and still regression-tested.
+
+### Security — floor is `>= 2.0.1` to carry the `pydantic-settings` fix
+
+The required `auth-sdk-m8` floor is **`>= 2.0.1`** (not `2.0.0`). auth-sdk-m8 2.0.1
+raised its `[config]` `pydantic-settings` floor `>= 2.14.1` → `>= 2.14.2`, the patch
+that hardens pydantic-settings' nested-secrets source against symlink escape/loop
+traversal. fastapi-m8 does **not** import `pydantic_settings` directly — it inherits
+`CommonSettings` (a `BaseSettings`) from `auth-sdk-m8[config]`, so the fix arrives
+transitively through this floor bump. No separate `pydantic-settings` pin is added
+here: the SDK's `[config]` extra owns that dependency, and duplicating the pin would
+fork a single source of truth.
 
 ---
 
