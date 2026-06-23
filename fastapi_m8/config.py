@@ -38,8 +38,9 @@ class ConsumerServiceSettings(
     fields (``SECRET_KEY``, ``TOKEN_MODE``, ``ALLOWED_ORIGINS``,
     ``SQLALCHEMY_DATABASE_URI``, ``API_PREFIX``, …) from ``CommonSettings``.
 
-    **Secret files (`_FILE` mounts).** ``settings_customise_sources`` is inherited
-    from ``CommonSettings``, so every secret field — including consumer-declared
+    **Secret files (`_FILE` mounts).** the ``settings_customise_sources``
+    classmethod is inherited from ``CommonSettings``, so every secret field —
+    including consumer-declared
     ones like ``METRICS_SCRAPE_CREDENTIAL`` — can be sourced from a mounted file by
     setting ``<FIELD>_FILE`` (e.g. ``DB_PASSWORD_FILE``, ``PRIVATE_API_SECRET_FILE``,
     ``METRICS_SCRAPE_CREDENTIAL_FILE``) to a path under ``/run/secrets/*``. The file

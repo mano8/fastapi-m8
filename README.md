@@ -58,7 +58,7 @@ health checks; the framework wires the rest.
 | Metrics middleware + `/metrics` | Optional; toggled via `METRICS_ENABLED`, scrape-gated via `METRICS_SCRAPE_CREDENTIAL` |
 | Response security headers | Tiered hardening from `auth-sdk-m8` (HSTS/CSP express opt-in) |
 | Health endpoint | `GET {API_PREFIX}/health/` with optional detail gating |
-| Service meta + liveness | Auto-mounted `GET {API_PREFIX}/meta` + `GET /ping` (also `GET {API_PREFIX}/ping`; fail-closed at boot) |
+| Service meta + liveness | Auto-mounted `GET {API_PREFIX}/meta` + `GET {API_PREFIX}/ping` (fail-closed at boot; single-mount at the effective prefix) |
 | Database lifecycle | `create_db_engine()` wrapping SQLAlchemy |
 | Startup validation | Auto-run `check_config_health()` + caller `startup_validators` before app signals ready |
 | Lifespan management | Auth teardown + DB pool dispose on shutdown |
@@ -302,14 +302,17 @@ environment variable.
 
 `create_app` auto-mounts the shared service triad from `auth-sdk-m8`: `GET {API_PREFIX}/meta`
 (cacheable service/version/contract identity, read by clients pre-auth to assert compatibility)
-and a dependency-free `GET /ping` liveness probe (→ `{"status": "ok"}`). `/ping` is mounted at
-**both** the root (so direct container/sidecar probes stay independent of the app's prefix config)
-and at `{API_PREFIX}/ping` (so liveness stays reachable behind a prefix-routing reverse proxy such
-as Traefik, which forwards only `PathPrefix({API_PREFIX})` — a root-only `/ping` would 404 at the
-gateway). The prefixed copy is hidden from the schema, so OpenAPI still lists a single `ping`
-operation. The `/meta` values are sourced from these settings, so a consumer **fails closed at
-boot** if it doesn't declare its identity. Keep both separate from a dependency-aware `/health`
-readiness probe.
+and a dependency-free `GET {API_PREFIX}/ping` liveness probe (→ `{"status": "ok"}`). `/ping` is
+mounted **once** at the effective prefix (single-mount since auth-sdk-m8 2.0.0): when a prefix is
+set, only `{API_PREFIX}/ping` exists so liveness stays reachable behind a prefix-routing reverse
+proxy (Traefik forwards only `PathPrefix({API_PREFIX})`); when no prefix is set, `/ping` is at the
+root. The single mount always appears in the OpenAPI schema. The `/meta` values are sourced from
+these settings, so a consumer **fails closed at boot** if it doesn't declare its identity. Keep
+both separate from a dependency-aware `/health` readiness probe.
+
+> **⚠️ Breaking change (3.0.0 / auth-sdk-m8 2.0.0):** root `GET /ping` no longer exists when
+> `API_PREFIX` is set. Update container `livenessProbe` / sidecar healthcheck URLs from `/ping`
+> to `{API_PREFIX}/ping` (e.g. `/api/ping`).
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -841,8 +844,8 @@ HTTP 200
   ],
   "service": "Item Service",
   "version": "1.0.0",
-  "fastapi_m8": "2.1.0",
-  "auth_sdk_m8": "1.5.x"
+  "fastapi_m8": "3.0.0",
+  "auth_sdk_m8": "2.0.x"
 }
 ```
 
@@ -1093,6 +1096,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `3.0.0` | `>=2.0.1, <3.0.0` | 3.11, 3.12, 3.13, 3.14 |
 | `2.1.0` | `>=1.5.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `2.0.0` | `>=1.4.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.6.0` | `>=1.3.0, <2.0.0` | 3.11, 3.12, 3.13 |
@@ -1113,7 +1117,7 @@ Check at runtime:
 ```python
 from fastapi_m8 import CAPABILITIES, __version__
 
-print(__version__)          # "2.1.0"
+print(__version__)          # "3.0.0"
 print(CAPABILITIES)         # {"async": False, "plugin_system": False,
                             #  "trace_context": False, "db_optional": True,
                             #  "health_detail_gating": True}
