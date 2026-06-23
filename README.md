@@ -310,7 +310,7 @@ root. The single mount always appears in the OpenAPI schema. The `/meta` values 
 these settings, so a consumer **fails closed at boot** if it doesn't declare its identity. Keep
 both separate from a dependency-aware `/health` readiness probe.
 
-> **⚠️ Breaking change (2.2.0 / auth-sdk-m8 2.0.0):** root `GET /ping` no longer exists when
+> **⚠️ Breaking change (3.0.0 / auth-sdk-m8 2.0.0):** root `GET /ping` no longer exists when
 > `API_PREFIX` is set. Update container `livenessProbe` / sidecar healthcheck URLs from `/ping`
 > to `{API_PREFIX}/ping` (e.g. `/api/ping`).
 
@@ -844,7 +844,7 @@ HTTP 200
   ],
   "service": "Item Service",
   "version": "1.0.0",
-  "fastapi_m8": "2.2.0",
+  "fastapi_m8": "3.0.0",
   "auth_sdk_m8": "2.0.x"
 }
 ```
@@ -1096,7 +1096,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
-| `2.2.0` | `>=2.0.0, <3.0.0` | 3.11, 3.12, 3.13, 3.14 |
+| `3.0.0` | `>=2.0.0, <3.0.0` | 3.11, 3.12, 3.13, 3.14 |
 | `2.1.0` | `>=1.5.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `2.0.0` | `>=1.4.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `1.6.0` | `>=1.3.0, <2.0.0` | 3.11, 3.12, 3.13 |
@@ -1117,7 +1117,7 @@ Check at runtime:
 ```python
 from fastapi_m8 import CAPABILITIES, __version__
 
-print(__version__)          # "2.1.0"
+print(__version__)          # "3.0.0"
 print(CAPABILITIES)         # {"async": False, "plugin_system": False,
                             #  "trace_context": False, "db_optional": True,
                             #  "health_detail_gating": True}

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fastapi-m8"
-version = "2.2.0"
+version = "3.0.0"
 description = "FastAPI application framework for m8 consumer microservices."
 readme = "README.md"
 license = { file = "LICENSE" }

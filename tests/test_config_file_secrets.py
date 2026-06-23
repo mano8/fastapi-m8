@@ -1,8 +1,8 @@
 """Regression tests for the inherited ``*_FILE`` secret mechanism (6.1).
 
 ``fastapi-m8`` consumers do **not** re-implement secret sourcing — they inherit
-``settings_customise_sources`` (and therefore the Docker/K8s ``<FIELD>_FILE``
-convention) from ``auth_sdk_m8.core.config.CommonSettings``. The production
+the ``settings_customise_sources`` classmethod (and therefore the Docker/K8s
+``<FIELD>_FILE`` convention) from ``auth_sdk_m8.core.config.CommonSettings``. The production
 overlay relies on this so secrets can be mounted under ``/run/secrets/*`` instead
 of being inlined as plaintext env values.
 

@@ -5,11 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [2.2.0] — 2026-06-22 · Align with auth-sdk-m8 2.0.0 — single-mount `/ping`
+## [3.0.0] — 2026-06-23 · auth-sdk-m8 2.0.0 alignment — single-mount `/ping` + SDK major floor
 
-> **Requires `auth-sdk-m8 >= 2.0.0`** — `mount_service_meta` single-mounts `/ping` at the
-> effective prefix. **BREAKING** for callers that relied on a bare root `/ping` when a
-> prefix is configured: switch container/sidecar probes to `{API_PREFIX}/ping`.
+> **MAJOR.** Two independent breaking changes, either of which alone forces this bump:
+> (1) `mount_service_meta` single-mounts `/ping` at the effective prefix — callers that
+> relied on a bare root `/ping` when a prefix is configured must switch container/sidecar
+> probes to `{API_PREFIX}/ping`; (2) the **required** `auth-sdk-m8` floor crosses a major
+> (`<2.0.0` → `>=2.0.0,<3.0.0`), which removed deprecated SDK APIs — `pip install -U
+> fastapi-m8` now force-upgrades the SDK across that major. (Supersedes the never-released
+> 2.2.0 label: the same work, correctly versioned as a major.)
 
 ### ⚠️ Breaking change — `/ping` is now single-mount
 
@@ -19,7 +23,7 @@ is set (the normal consumer case), `/ping` is now mounted **only** at `{API_PREF
 
 - **What was true in 2.1.x:** root `GET /ping` always returned 200 regardless of
   `API_PREFIX`; additionally `GET {API_PREFIX}/ping` was mounted (schema-hidden copy).
-- **What is true in 2.2.x:** only `GET {API_PREFIX}/ping` exists when a prefix is set;
+- **What is true in 3.0.x:** only `GET {API_PREFIX}/ping` exists when a prefix is set;
   only `GET /ping` (root) when no prefix is set. The single mount is **always in the
   OpenAPI schema** — it is no longer hidden.
 - **Action required:** update container `livenessProbe` / sidecar healthcheck URLs from
@@ -33,6 +37,28 @@ is set (the normal consumer case), `/ping` is now mounted **only** at `{API_PREF
   `ConsumerCredentialRegistry` / `make_consumer_authorizer` (Phase 9.1) and the
   `SECURITY.md` mTLS guidance (Phase 9.2) — available to consumers via the SDK without
   any fastapi-m8 code change.
+
+### Why the floor is a **major** — auth-sdk-m8 2.0.0 dropped deprecated APIs
+
+auth-sdk-m8 2.0.0 is a major because it **removes** every previously-deprecated
+surface. fastapi-m8 was never coupled to any of them, so no consumer-facing code,
+import, or setting changes here — the full suite is green at 100 % against the SDK
+2.0.0 final. The removals, and why fastapi-m8 is already clear of each:
+
+- **Redis Pub/Sub event bus** (`auth_sdk_m8.redis_events`: `EventBus` /
+  `EventPublisher` / `EventSubscriber`). fastapi-m8 consumes auth events over the
+  **fa-auth SSE bridge** (`auth_sdk_m8.events.AuthEventStreamClient`, re-exported as
+  `build_event_stream_client` / `AuthEventStreamClient` since 1.4.0), never the
+  Redis bus. The retained signing helpers moved to `auth_sdk_m8.events._signing`
+  (wire format unchanged); fastapi-m8 does not import them directly.
+- **`ComSecurityHelper.decode_access_token`** + `LEGACY_ACCESS_TOKEN_VALIDATION_CONFIG`.
+  fastapi-m8 validates tokens through `build_auth_deps()` → `build_access_validator`
+  (`TokenValidator`), the non-deprecated path.
+- **`TOKEN_ALGORITHM`** knob. `ConsumerServiceSettings` exposes `ACCESS_TOKEN_ALGORITHM`
+  directly (RS256 default); the deprecated seeding knob was never surfaced.
+- **Module-level `settings_customise_sources()`**. The `_FILE`/Vault source ordering
+  comes from the retained `CommonSettings.settings_customise_sources` **classmethod**
+  that `ConsumerServiceSettings` inherits — unchanged and still regression-tested.
 
 ---
 
