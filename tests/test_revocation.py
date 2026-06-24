@@ -97,6 +97,130 @@ async def test_close_calls_aclose() -> None:
     mock_aclose.assert_awaited_once()
 
 
+# ── Per-consumer internal-auth wiring (item 9.1) ──────────────────────────────
+
+
+class _FakeAuth:
+    """Minimal InternalAuthProvider double tracking calls."""
+
+    def __init__(self, headers: dict, retry: bool) -> None:
+        self._headers = headers
+        self._retry = retry
+        self.invalidated = 0
+        self.closed = False
+
+    async def headers(self) -> dict:
+        return dict(self._headers)
+
+    async def invalidate(self) -> bool:
+        self.invalidated += 1
+        return self._retry
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def test_requires_exactly_one_credential_source() -> None:
+    """Neither or both of private_api_secret/auth_provider is a config error."""
+    with pytest.raises(ValueError, match="exactly one"):
+        RemoteRevocationClient(introspection_url=_URL)
+    with pytest.raises(ValueError, match="exactly one"):
+        RemoteRevocationClient(
+            introspection_url=_URL,
+            private_api_secret=_SECRET,
+            auth_provider=_FakeAuth({}, retry=False),
+        )
+
+
+@pytest.mark.anyio
+async def test_legacy_secret_sent_as_internal_token_header() -> None:
+    """The legacy path attaches X-Internal-Token on every request."""
+    client = _make_client()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {"active": True}
+    post = AsyncMock(return_value=mock_resp)
+    setattr(client._client, "post", post)
+
+    await client.is_revoked("jti-1")
+    _, kwargs = post.call_args
+    assert kwargs["headers"] == {"X-Internal-Token": _SECRET}
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_provider_headers_attached_per_request() -> None:
+    """A per-consumer provider's headers are attached to the call."""
+    auth = _FakeAuth(
+        {"X-Internal-Client": "svc-a", "X-Internal-Token": _SECRET}, retry=False
+    )
+    client = RemoteRevocationClient(introspection_url=_URL, auth_provider=auth)
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {"active": True}
+    post = AsyncMock(return_value=mock_resp)
+    setattr(client._client, "post", post)
+
+    await client.is_revoked("jti-1")
+    _, kwargs = post.call_args
+    assert kwargs["headers"]["X-Internal-Client"] == "svc-a"
+    await client.close()
+    assert auth.closed is True
+
+
+def _status_error(code: int) -> httpx.HTTPStatusError:
+    return httpx.HTTPStatusError(
+        str(code), request=MagicMock(), response=MagicMock(status_code=code)
+    )
+
+
+@pytest.mark.anyio
+async def test_401_reexchanges_and_retries_once() -> None:
+    """Service-token mode: a 401 invalidates, re-mints, and retries once."""
+    auth = _FakeAuth({"Authorization": "Bearer t"}, retry=True)
+    client = RemoteRevocationClient(introspection_url=_URL, auth_provider=auth)
+    ok = MagicMock()
+    ok.raise_for_status = MagicMock()
+    ok.json.return_value = {"active": True}
+    bad = MagicMock()
+    bad.raise_for_status = MagicMock(side_effect=_status_error(401))
+    setattr(client._client, "post", AsyncMock(side_effect=[bad, ok]))
+
+    assert await client.is_revoked("jti-1") is False
+    assert auth.invalidated == 1
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_401_not_retried_in_static_mode() -> None:
+    """Legacy/bootstrap (invalidate→False): a 401 is not retried, fails closed."""
+    auth = _FakeAuth({"X-Internal-Token": _SECRET}, retry=False)
+    client = RemoteRevocationClient(introspection_url=_URL, auth_provider=auth)
+    bad = MagicMock()
+    bad.raise_for_status = MagicMock(side_effect=_status_error(401))
+    setattr(client._client, "post", AsyncMock(return_value=bad))
+
+    with pytest.raises(RevocationCheckError):
+        await client.is_revoked("jti-1")
+    assert auth.invalidated == 1
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_non_401_status_error_not_retried() -> None:
+    """A 500 is never retried regardless of provider mode."""
+    auth = _FakeAuth({"Authorization": "Bearer t"}, retry=True)
+    client = RemoteRevocationClient(introspection_url=_URL, auth_provider=auth)
+    bad = MagicMock()
+    bad.raise_for_status = MagicMock(side_effect=_status_error(500))
+    setattr(client._client, "post", AsyncMock(return_value=bad))
+
+    with pytest.raises(RevocationCheckError):
+        await client.is_revoked("jti-1")
+    assert auth.invalidated == 0
+    await client.close()
+
+
 # ── JtiRevocationCache ────────────────────────────────────────────────────────
 
 
@@ -375,6 +499,53 @@ def test_flush_cache_delegates_to_cache() -> None:
     client._cache.put("jti-1", "user-a")
     client.flush_cache()
     assert client._cache.get("jti-1") is None
+
+
+# ── Consumer-side degradation matrix (item 5.5) ───────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_fail_closed_raises_and_counts_failure(fresh_metrics) -> None:
+    """fail_closed + unreachable introspection → raises and counts mode=fail_closed."""
+    client = _make_client(fail_closed=True)
+    setattr(client._client, "post", AsyncMock(side_effect=httpx.ConnectError("down")))
+
+    with pytest.raises(RevocationCheckError):
+        await client.is_revoked("jti-1")
+    reg = fresh_metrics.REGISTRY
+    assert _sv(reg, "revocation_check_failures_total", {"mode": "fail_closed"}) == 1.0
+    assert _sv(reg, "revocation_check_failures_total", {"mode": "fail_open"}) == 0.0
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_fail_open_accepts_logs_and_counts_optout(fresh_metrics, caplog) -> None:
+    """fail_open opt-out: token accepted, logged loudly, and counted mode=fail_open."""
+    import logging
+
+    client = _make_client(fail_closed=False)
+    setattr(client._client, "post", AsyncMock(side_effect=httpx.ConnectError("down")))
+
+    with caplog.at_level(logging.WARNING, logger="fastapi_m8._revocation"):
+        assert await client.is_revoked("jti-1") is False
+    assert "security.revocation_fail_open" in caplog.text
+    reg = fresh_metrics.REGISTRY
+    assert _sv(reg, "revocation_check_failures_total", {"mode": "fail_open"}) == 1.0
+    assert _sv(reg, "revocation_check_failures_total", {"mode": "fail_closed"}) == 0.0
+    await client.close()
+
+
+@pytest.mark.anyio
+async def test_failure_metric_no_jti_in_output(fresh_metrics) -> None:
+    """The failure counter exposes only the mode dimension — never the JTI."""
+    client = _make_client(fail_closed=False)
+    setattr(client._client, "post", AsyncMock(side_effect=httpx.ConnectError("down")))
+    await client.is_revoked("jti-secret-value")
+    body, _ = fresh_metrics.render()
+    text = body.decode()
+    assert "jti-secret-value" not in text
+    assert 'mode="fail_open"' in text
+    await client.close()
 
 
 def test_evict_jti_noop_without_cache() -> None:

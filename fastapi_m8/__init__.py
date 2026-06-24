@@ -50,6 +50,14 @@ from fastapi_m8._health import (
     HealthCheckResult,
     HealthStatus,
 )
+
+# Tier 1 — per-consumer internal-auth for private calls (Phase 9.1)
+from fastapi_m8._internal_auth import (
+    InternalAuthProvider,
+    ServiceTokenInternalAuth,
+    build_internal_auth,
+    derive_service_token_url,
+)
 from fastapi_m8._version import __version__
 from fastapi_m8.config import ConsumerServiceSettings
 
@@ -64,6 +72,11 @@ __all__ = [
     "create_db_engine",
     "DbEngine",
     "ConsumerServiceSettings",
+    # Tier 1 — per-consumer internal-auth
+    "build_internal_auth",
+    "InternalAuthProvider",
+    "ServiceTokenInternalAuth",
+    "derive_service_token_url",
     # Tier 1 — auth event stream
     "build_event_stream_client",
     "AuthEventStreamClient",

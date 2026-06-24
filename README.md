@@ -357,9 +357,28 @@ Required only when `TOKEN_MODE=stateful` and `AUTH_SERVICE_ROLE=consumer`.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `INTROSPECTION_URL` | Yes | — | `POST` endpoint on auth service for JTI revocation checks, e.g. `http://auth_user_service:8000/user/private/v1/jti-status` |
-| `PRIVATE_API_SECRET` | Yes | — | Shared secret for `X-Internal-Token` header (must match auth service) |
-| `ACCESS_REVOCATION_FAILURE_MODE` | No | `fail_closed` | `fail_closed` (default, secure — reject tokens when the check is unverifiable) or `fail_open` (accept on network/HTTP error). |
+| `PRIVATE_API_SECRET` | Yes | — | The credential for private calls. In **legacy** mode it is the single shared secret sent as `X-Internal-Token` (must match auth service); in **per-consumer** mode (see below) it carries *this* consumer's bootstrap secret. |
+| `ACCESS_REVOCATION_FAILURE_MODE` | No | `fail_closed` | `fail_closed` (default, secure — reject tokens when the check is unverifiable, returning **503**) or `fail_open` (accept on network/HTTP error — the opt-out is logged loudly and counted as `revocation_check_failures_total{mode="fail_open"}`). |
 | `REVOCATION_CACHE_TTL_SECONDS` | No | `0` | Short-TTL positive validation cache. `0` (default) disables it — every request calls fa-auth. Set to e.g. `30` to trust an `active=True` result for 30 s, skipping the HTTP round-trip; stream events (`session-revoked`/`user-deleted`) evict affected entries and an unresumable gap flushes all (requires the event-stream client). |
+
+#### Per-consumer internal auth (item 9.1)
+
+By default a consumer authenticates private calls with the single shared
+`PRIVATE_API_SECRET` (legacy mode), which matches fa-auth's fallback when it has no
+`PRIVATE_API_CONSUMERS` registry. Set `INTERNAL_CLIENT_ID` to switch to the
+**per-consumer** model: `PRIVATE_API_SECRET` becomes this service's *bootstrap*
+secret, fa-auth authorizes each private route by the credential's granted scope
+(deny-by-default), and the blast radius collapses from the whole fleet to one
+consumer. Optionally exchange the bootstrap credential for short-TTL `Authorization:
+Bearer` service tokens so rotation comes for free from the token TTL. Selection is
+purely by config — the home lab keeps working untouched.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `INTERNAL_CLIENT_ID` | No | — | This consumer's `X-Internal-Client` id. Unset = legacy single-secret mode; set = per-consumer bootstrap mode. |
+| `SERVICE_TOKEN_EXCHANGE_ENABLED` | No | `false` | Exchange the bootstrap credential for short-TTL Bearer service tokens at `{issuer}/private/v1/service-token` (requires `INTERNAL_CLIENT_ID`). |
+| `SERVICE_TOKEN_SCOPES` | No | `["introspection"]` | Scopes requested when minting a service token; fa-auth narrows to the subset the bootstrap credential was granted. |
+| `SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS` | No | `30` | Refresh a cached service token this many seconds before its `exp` so a call never races expiry. |
 
 ### Auth Event Stream (fa-auth SSE bridge)
 
@@ -521,6 +540,23 @@ locally before deploy).
 
 > These knobs are inherited from `CommonSettings`; consumer services do not redeclare
 > them. The same layer is shared by `fa-auth-m8` and every consumer.
+
+### Defaults by layer (consumer)
+
+How the security-critical settings behave specifically in the **fastapi-m8 consumer**
+layer. This is the consumer column of the fleet-wide defaults-by-layer table (the SDK and
+fa-auth-m8 READMEs hold the issuer/SDK columns). The throughline: secure-by-default,
+inherited from `auth-sdk-m8`, and made *fatal* only when pointed at production.
+
+| Control | Consumer behaviour | Becomes fatal when |
+|---|---|---|
+| Config-health gate | `create_app` **auto-runs** `check_config_health` in its lifespan before the app signals ready — no manual wiring | any fatal check trips (raises `ConfigurationError`, app refuses to boot) |
+| `ACCESS_REVOCATION_FAILURE_MODE` | `fail_closed` by default — an unverifiable revocation check returns **503**; `fail_open` is a conscious opt-out, logged loudly and counted (`revocation_check_failures_total{mode="fail_open"}`) | never fatal (it *is* the degradation policy) |
+| `ALLOWED_HOSTS` | inherited from `CommonSettings`; unset = no host check (dev) | unset under `STRICT_PRODUCTION_MODE` (strict fatal); wildcard `*` under strict |
+| `EVENT_SIGNING_ENABLED` / `EVENT_SIGNING_ACCEPT_UNSIGNED` | inherited secure defaults (signing on, unsigned rejected); the gate fires through the consumer's auto-run config-health (item 7.x.1) | `ENABLED=false` under strict; `ACCEPT_UNSIGNED=true` under production or strict |
+| `METRICS_SCRAPE_CREDENTIAL` | unset = `/metrics` relies on network isolation only; set = constant-time `Authorization: Bearer` gate | never fatal (network-isolation is a valid posture) |
+| `INTERNAL_CLIENT_ID` (item 9.1) | unset = legacy single `PRIVATE_API_SECRET`; set = per-consumer bootstrap / service-token auth on private calls | never fatal (must be coordinated with the issuer's `PRIVATE_API_CONSUMERS`) |
+| `_FILE` secret mounts | **inherited** from `CommonSettings` — every secret (`PRIVATE_API_SECRET_FILE`, `DB_PASSWORD_FILE`, `METRICS_SCRAPE_CREDENTIAL_FILE`, …) can be sourced from `/run/secrets/*` with no code change | a referenced `<FIELD>_FILE` path is missing (fails closed at construction) |
 
 ---
 

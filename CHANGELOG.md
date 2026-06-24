@@ -5,6 +5,60 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [3.1.0] — 2026-06-24 · consumer-side post-1.0 remediation (9.1 / 5.5 / 7.x.1 / 9.2 / 10.1)
+
+> **MINOR — additive, backward-compatible.** Default behaviour is unchanged: a consumer
+> with none of the new settings set keeps the legacy single `PRIVATE_API_SECRET`
+> (`X-Internal-Token`) posture and the existing fail-closed revocation path. The post-1.0
+> breaking removals (retiring the shared `PRIVATE_API_SECRET` model) remain **deferred** —
+> published `fastapi-m8 3.0.0` / `auth-sdk-m8 2.0.1` are not yet consumed by any live
+> issuer/consumer stack, so this remediation wave folds into a minor rather than forcing a
+> new major. Requires `auth-sdk-m8 >= 2.0.1, < 3.0.0` (unchanged floor — the 9.1
+> verification primitives shipped additively in SDK 2.0.0).
+
+### Added
+
+- **Per-consumer credentials & short-TTL service tokens — consumer side (item 9.1).** New
+  `fastapi_m8._internal_auth` with `build_internal_auth(settings)` selecting one of three
+  modes purely by config:
+  - **legacy** (`INTERNAL_CLIENT_ID` unset) — single `X-Internal-Token`, as before;
+  - **bootstrap** (`INTERNAL_CLIENT_ID` set) — per-consumer `X-Internal-Client` +
+    `X-Internal-Token` on every private call;
+  - **service token** (`+ SERVICE_TOKEN_EXCHANGE_ENABLED`) — exchange the bootstrap
+    credential at `{issuer}/private/v1/service-token` for a short-TTL `Authorization:
+    Bearer` token, refreshed before `exp` and re-exchanged once on a `401`.
+
+  `RemoteRevocationClient` now attaches the provider's headers per request (with a single
+  401 re-exchange retry) instead of baking `X-Internal-Token` in at construction. New
+  public exports: `build_internal_auth`, `InternalAuthProvider`,
+  `ServiceTokenInternalAuth`, `derive_service_token_url`. New settings:
+  `INTERNAL_CLIENT_ID`, `SERVICE_TOKEN_EXCHANGE_ENABLED`, `SERVICE_TOKEN_SCOPES`,
+  `SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS`.
+- **Revocation degradation observability (item 5.5).** New
+  `revocation_check_failures_total{mode}` counter and a loud `security.revocation_fail_open`
+  log line: a `fail_open` opt-out is now surfaced as a conscious availability-over-safety
+  decision, never silent. Consumer-side degradation matrix tested end-to-end
+  (`fail_closed` → 503, `fail_open` → token accepted) through `get_current_user`.
+- **`SECURITY.md` (item 9.2).** New consumer-scoped security doc cross-referencing
+  `auth-sdk-m8`'s canonical "Service identity and mTLS" pattern for multi-host deployments,
+  plus a vulnerability-reporting section.
+
+### Changed
+
+- **README (item 10.1).** New *Per-consumer internal auth* subsection and a *Defaults by
+  layer (consumer)* table documenting the consumer column (auto-run config-health,
+  `ALLOWED_HOSTS` inheritance, `METRICS_SCRAPE_CREDENTIAL`, `_FILE` inheritance,
+  `ACCESS_REVOCATION_FAILURE_MODE`).
+- **Event-signing rollout flags surfaced for consumers (item 7.x.1).** `.env.example`
+  documents `EVENT_SIGNING_ENABLED` / `EVENT_SIGNING_ACCEPT_UNSIGNED` and their strict
+  config-health gate (fatal under `STRICT_PRODUCTION_MODE`; `ACCEPT_UNSIGNED` also fatal
+  under `ENVIRONMENT=production`). The gate is auto-run via `create_app`; a consumer-side
+  test asserts it fires. `.env.example` also gains the new 9.1 vars and
+  `REVOCATION_CACHE_TTL_SECONDS`.
+- `COMPAT_MATRIX` gains a `3.1` entry (same `auth-sdk-m8 >=2.0.1,<3.0.0` floor as 3.0).
+
+---
+
 ## [3.0.0] — 2026-06-23 · auth-sdk-m8 2.0.0 alignment — single-mount `/ping` + SDK major floor
 
 > **MAJOR.** Two independent breaking changes, either of which alone forces this bump:

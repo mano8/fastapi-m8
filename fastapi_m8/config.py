@@ -78,6 +78,46 @@ class ConsumerServiceSettings(
     # by JTI/user, an unresumable gap flushes all (requires event stream client).
     REVOCATION_CACHE_TTL_SECONDS: int = Field(0, ge=0)
 
+    # ── Per-consumer internal-auth (9.1, consumer side) ──────────────────────
+    # Identity this consumer presents on private calls to fa-auth. Unset
+    # (default) keeps the legacy single-secret mode: PRIVATE_API_SECRET is sent
+    # as X-Internal-Token, matching the issuer's legacy fallback when it has no
+    # PRIVATE_API_CONSUMERS registry. Set to this service's registered consumer
+    # id to switch to the per-consumer model — PRIVATE_API_SECRET then carries
+    # *this consumer's* bootstrap secret, and the issuer gates each private route
+    # by the credential's granted scope (deny-by-default).
+    INTERNAL_CLIENT_ID: str | None = Field(
+        None,
+        description=(
+            "This consumer's X-Internal-Client id for per-consumer private auth. "
+            "Unset = legacy single shared PRIVATE_API_SECRET mode."
+        ),
+    )
+    # When INTERNAL_CLIENT_ID is set, opt into exchanging the bootstrap
+    # credential for a short-TTL scoped service token (OAuth client-credentials
+    # style) at {issuer}/private/v1/service-token, presented as
+    # ``Authorization: Bearer``. Rotation comes for free from the short TTL.
+    # False (default) sends the bootstrap X-Internal-Client/X-Internal-Token
+    # pair directly on every private call.
+    SERVICE_TOKEN_EXCHANGE_ENABLED: bool = Field(
+        False,
+        description=(
+            "Exchange the bootstrap credential for short-TTL Bearer service "
+            "tokens (requires INTERNAL_CLIENT_ID)."
+        ),
+    )
+    # Scopes requested when exchanging for a service token; the issuer narrows to
+    # the subset the bootstrap credential was granted. Empty/unset defaults to
+    # ["introspection"] — the only private call fastapi-m8 makes today.
+    SERVICE_TOKEN_SCOPES: list[str] | None = Field(
+        None, description="Scopes to request when minting a service token."
+    )
+    # Refresh a cached service token this many seconds before its exp so a call
+    # never races expiry.
+    SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS: int = Field(
+        30, ge=0, description="Seconds before exp to refresh a service token."
+    )
+
     # Metrics scrape credential for the ``/metrics`` endpoint (auth-sdk-m8 guard 1.4).
     # Unset (default) = network-isolation only; ``/metrics`` answers without auth.
     # Set to a long-lived static secret and configure Prometheus

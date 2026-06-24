@@ -262,6 +262,44 @@ async def test_get_current_user_revocation_error_raises_503() -> None:
     assert exc_info.value.status_code == 503
 
 
+# ── 5.5 consumer-side degradation matrix (end-to-end through get_current_user) ──
+
+
+@pytest.mark.anyio
+async def test_fail_closed_introspection_down_returns_503() -> None:
+    """fail_closed + unreachable introspection → get_current_user raises 503."""
+    import httpx
+
+    auth = _stateful_auth(ACCESS_REVOCATION_FAILURE_MODE="fail_closed")
+    assert auth.revocation_client is not None
+    setattr(
+        auth.revocation_client._client,
+        "post",
+        AsyncMock(side_effect=httpx.ConnectError("down")),
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await auth.get_current_user(make_access_token())
+    assert exc_info.value.status_code == 503
+    await auth.close()
+
+
+@pytest.mark.anyio
+async def test_fail_open_introspection_down_accepts_token() -> None:
+    """fail_open opt-out + unreachable introspection → token is accepted."""
+    import httpx
+
+    auth = _stateful_auth(ACCESS_REVOCATION_FAILURE_MODE="fail_open")
+    assert auth.revocation_client is not None
+    setattr(
+        auth.revocation_client._client,
+        "post",
+        AsyncMock(side_effect=httpx.ConnectError("down")),
+    )
+    user = await auth.get_current_user(make_access_token())
+    assert isinstance(user, UserModel)
+    await auth.close()
+
+
 # ── get_current_active_admin ──────────────────────────────────────────────────
 
 

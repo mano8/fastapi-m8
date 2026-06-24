@@ -60,6 +60,13 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # >=2.14.2, carrying the SDK 2.0.1 nested-secrets symlink-traversal fix. See
     # CHANGELOG.
     "3.0": {"auth-sdk-m8": ">=2.0.1,<3.0.0"},
+    # 3.1 (MINOR) adds the consumer side of per-consumer credentials / short-TTL
+    # service tokens (item 9.1), consuming auth-sdk-m8 2.0.x's ConsumerScope /
+    # consumer_auth header constants. Same SDK floor as 3.0 (>=2.0.1,<3.0.0) —
+    # the 9.1 primitives shipped additively in 2.0.0, so no floor change. Also
+    # lands consumer-side 5.5 / 7.x.1 test+observability and 9.2/10.1 docs. The
+    # post-1.0 breaking-removal majors stay deferred (see CHANGELOG). See CHANGELOG.
+    "3.1": {"auth-sdk-m8": ">=2.0.1,<3.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
