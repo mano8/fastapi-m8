@@ -118,6 +118,24 @@ class ConsumerServiceSettings(
         30, ge=0, description="Seconds before exp to refresh a service token."
     )
 
+    # ── Health-detail gating (item 9.3) ──────────────────────────────────────
+    # Dedicated credential for the deep-/health detail body gate.  Unset
+    # (default) = detail body never shown (fail-closed); callers only see the
+    # shallow {"status": "ok/fail"} response.  Set to a long-lived static secret
+    # and present it as X-Internal-Token to receive the full per-check breakdown.
+    # Must NOT equal PRIVATE_API_SECRET — accidental reuse is a fatal startup
+    # misconfiguration (checked by _build_config_health_validator on every boot).
+    # Separately rotatable from the private-API bootstrap credential.
+    HEALTH_DETAIL_CREDENTIAL: SecretStr | None = Field(
+        None,
+        description=(
+            "Optional credential for the /health detail body gate. "
+            "When unset, /health returns only the shallow status (fail-closed). "
+            "When set, X-Internal-Token must match to receive full detail. "
+            "Must not equal PRIVATE_API_SECRET."
+        ),
+    )
+
     # Metrics scrape credential for the ``/metrics`` endpoint (auth-sdk-m8 guard 1.4).
     # Unset (default) = network-isolation only; ``/metrics`` answers without auth.
     # Set to a long-lived static secret and configure Prometheus

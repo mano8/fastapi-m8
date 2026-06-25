@@ -468,13 +468,24 @@ do not connect to Redis directly.
 | `REDIS_PASSWORD` | Redis password |
 | `REDIS_SSL` | Enable TLS (`true`/`false`, default `false`) |
 
+### Health Detail Gating (item 9.3)
+
+| Variable | Default | Description |
+|---|---|---|
+| `HEALTH_DETAIL_CREDENTIAL` | — | Optional credential for the `/health` detail body gate. When **unset**, `/health` returns only `{"status": "ok/fail"}` to all callers (fail-closed). When set, callers must present `X-Internal-Token: <value>` (constant-time match) to receive the full per-check breakdown. **Must not equal `PRIVATE_API_SECRET`** — accidental reuse is a fatal startup misconfiguration. Supports `_FILE` mount: set `HEALTH_DETAIL_CREDENTIAL_FILE=/run/secrets/health_cred.txt`. |
+
+> **No-reuse enforcement (item 9.3):** at startup, `create_app` asserts that neither
+> `HEALTH_DETAIL_CREDENTIAL` nor `METRICS_SCRAPE_CREDENTIAL` equals `PRIVATE_API_SECRET`.
+> This ensures each credential is independently rotatable — exposing one value cannot open
+> multiple surfaces. The check raises `ConfigurationError` (fail-closed), aborting startup.
+
 ### Observability
 
 | Variable | Default | Description |
 |---|---|---|
 | `METRICS_ENABLED` | `false` | Enable Prometheus metrics middleware and the `/metrics` route |
 | `METRICS_GROUPS` | — | Comma-separated groups: `traffic`, `performance`, `reliability`, `health`, `auth`, or `all` |
-| `METRICS_SCRAPE_CREDENTIAL` | — | Optional static bearer credential for the `/metrics` scrape endpoint. When set, requests must present `Authorization: Bearer <value>` (constant-time match). When unset, `/metrics` relies on network isolation only. |
+| `METRICS_SCRAPE_CREDENTIAL` | — | Optional static bearer credential for the `/metrics` scrape endpoint. When set, requests must present `Authorization: Bearer <value>` (constant-time match). When unset, `/metrics` relies on network isolation only. **Must not equal `PRIVATE_API_SECRET`**. |
 
 > **`/metrics` route:** when `METRICS_ENABLED=true`, `create_app` also registers a
 > `GET /metrics` endpoint (hidden from the schema) rendering the Prometheus registry.
@@ -559,9 +570,10 @@ inherited from `auth-sdk-m8`, and made *fatal* only when pointed at production.
 | `ACCESS_REVOCATION_FAILURE_MODE` | `fail_closed` by default — an unverifiable revocation check returns **503**; `fail_open` is a conscious opt-out, logged loudly and counted (`revocation_check_failures_total{mode="fail_open"}`) | never fatal (it *is* the degradation policy) |
 | `ALLOWED_HOSTS` | inherited from `CommonSettings`; unset = no host check (dev) | unset under `STRICT_PRODUCTION_MODE` (strict fatal); wildcard `*` under strict |
 | `EVENT_SIGNING_ENABLED` / `EVENT_SIGNING_ACCEPT_UNSIGNED` | inherited secure defaults (signing on, unsigned rejected); the gate fires through the consumer's auto-run config-health (item 7.x.1) | `ENABLED=false` under strict; `ACCEPT_UNSIGNED=true` under production or strict |
-| `METRICS_SCRAPE_CREDENTIAL` | unset = `/metrics` relies on network isolation only; set = constant-time `Authorization: Bearer` gate | never fatal (network-isolation is a valid posture) |
+| `METRICS_SCRAPE_CREDENTIAL` | unset = `/metrics` relies on network isolation only; set = constant-time `Authorization: Bearer` gate. **Must not equal `PRIVATE_API_SECRET`** (fatal reuse check at startup). | never fatal (network-isolation is a valid posture); reuse of `PRIVATE_API_SECRET` is fatal |
+| `HEALTH_DETAIL_CREDENTIAL` (item 9.3) | unset = `/health` returns only shallow status to all callers (fail-closed, detail never shown); set = `X-Internal-Token` must match to receive the full per-check breakdown. **Must not equal `PRIVATE_API_SECRET`** (fatal reuse check at startup). | never fatal (no credential = no detail, which is a valid posture); reuse of `PRIVATE_API_SECRET` is fatal |
 | `INTERNAL_CLIENT_ID` (item 9.1) | unset = legacy single `PRIVATE_API_SECRET`; set = per-consumer bootstrap / service-token auth on private calls | never fatal (must be coordinated with the issuer's `PRIVATE_API_CONSUMERS`) |
-| `_FILE` secret mounts | **inherited** from `CommonSettings` — every secret (`PRIVATE_API_SECRET_FILE`, `DB_PASSWORD_FILE`, `METRICS_SCRAPE_CREDENTIAL_FILE`, …) can be sourced from `/run/secrets/*` with no code change | a referenced `<FIELD>_FILE` path is missing (fails closed at construction) |
+| `_FILE` secret mounts | **inherited** from `CommonSettings` — every secret (`PRIVATE_API_SECRET_FILE`, `DB_PASSWORD_FILE`, `METRICS_SCRAPE_CREDENTIAL_FILE`, `HEALTH_DETAIL_CREDENTIAL_FILE`, …) can be sourced from `/run/secrets/*` with no code change | a referenced `<FIELD>_FILE` path is missing (fails closed at construction) |
 
 ---
 

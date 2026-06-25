@@ -11,6 +11,7 @@ from asgi_lifespan import LifespanManager
 from auth_sdk_m8.core.exceptions import ConfigurationError
 from fastapi import APIRouter
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 
 from fastapi_m8 import (
     AppLifecycle,
@@ -97,10 +98,12 @@ async def test_health_minimal_body_unauthenticated(test_app) -> None:
 
 @pytest.mark.anyio
 async def test_health_detail_with_internal_token(test_router: APIRouter) -> None:
-    """X-Internal-Token header exposes per-check detail to authorized callers."""
-    s = make_settings(**_BASE, PRIVATE_API_SECRET="mysecrettoken")
+    """HEALTH_DETAIL_CREDENTIAL token exposes per-check detail to authorized callers."""
+    s = make_settings(**_BASE, HEALTH_DETAIL_CREDENTIAL="health-detail-secret")
     a = create_app(s, test_router, service_name="test", service_version="1.0.0")
-    async with live_client(a, headers={"X-Internal-Token": "mysecrettoken"}) as client:
+    async with live_client(
+        a, headers={"X-Internal-Token": "health-detail-secret"}
+    ) as client:
         resp = await client.get("/api/health/")
     body = resp.json()
     assert "fastapi_m8" in body
@@ -109,12 +112,94 @@ async def test_health_detail_with_internal_token(test_router: APIRouter) -> None
 
 @pytest.mark.anyio
 async def test_health_wrong_token_minimal(test_router: APIRouter) -> None:
-    """Wrong X-Internal-Token yields the minimal public body."""
-    s = make_settings(**_BASE, PRIVATE_API_SECRET="correcttoken")
+    """Wrong X-Internal-Token against HEALTH_DETAIL_CREDENTIAL yields minimal body."""
+    s = make_settings(**_BASE, HEALTH_DETAIL_CREDENTIAL="correcttoken")
     a = create_app(s, test_router)
     async with live_client(a) as client:
         resp = await client.get("/api/health/", headers={"X-Internal-Token": "wrong"})
     assert "checks" not in resp.json()
+
+
+# ── Health detail gating — item 9.3 ──────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_health_detail_hidden_when_credential_unset(
+    test_router: APIRouter,
+) -> None:
+    """No HEALTH_DETAIL_CREDENTIAL → detail body never shown (fail-closed)."""
+    a = create_app(make_settings(**_BASE), test_router)
+    async with live_client(a) as client:
+        resp = await client.get(
+            "/api/health/", headers={"X-Internal-Token": "anyvalue"}
+        )
+    body = resp.json()
+    assert "checks" not in body
+    assert "fastapi_m8" not in body
+
+
+@pytest.mark.anyio
+async def test_health_private_api_secret_does_not_open_detail(
+    test_router: APIRouter,
+) -> None:
+    """PRIVATE_API_SECRET must NOT unlock /health detail (9.3 no-reuse)."""
+    s = make_settings(
+        **_BASE,
+        PRIVATE_API_SECRET=SecretStr("private-secret"),
+    )
+    a = create_app(s, test_router)
+    async with live_client(a, headers={"X-Internal-Token": "private-secret"}) as client:
+        resp = await client.get("/api/health/")
+    body = resp.json()
+    assert "checks" not in body
+    assert "fastapi_m8" not in body
+
+
+@pytest.mark.anyio
+async def test_health_detail_credential_reuse_as_private_secret_rejected(
+    test_router: APIRouter,
+) -> None:
+    """HEALTH_DETAIL_CREDENTIAL == PRIVATE_API_SECRET is a fatal startup error."""
+    s = make_settings(
+        **_BASE,
+        PRIVATE_API_SECRET=SecretStr("shared-secret"),
+        HEALTH_DETAIL_CREDENTIAL=SecretStr("shared-secret"),
+    )
+    a = create_app(s, test_router)
+    with pytest.raises(ConfigurationError, match="HEALTH_DETAIL_CREDENTIAL"):
+        async with a.router.lifespan_context(a):
+            pass
+
+
+@pytest.mark.anyio
+async def test_metrics_scrape_credential_reuse_as_private_secret_rejected(
+    test_router: APIRouter,
+) -> None:
+    """METRICS_SCRAPE_CREDENTIAL == PRIVATE_API_SECRET is a fatal startup error."""
+    s = make_settings(
+        **_BASE,
+        PRIVATE_API_SECRET=SecretStr("shared-secret"),
+        METRICS_SCRAPE_CREDENTIAL=SecretStr("shared-secret"),
+    )
+    a = create_app(s, test_router)
+    with pytest.raises(ConfigurationError, match="METRICS_SCRAPE_CREDENTIAL"):
+        async with a.router.lifespan_context(a):
+            pass
+
+
+@pytest.mark.anyio
+async def test_distinct_credentials_do_not_raise(test_router: APIRouter) -> None:
+    """Distinct HEALTH_DETAIL_CREDENTIAL and METRICS_SCRAPE_CREDENTIAL are accepted."""
+    s = make_settings(
+        **_BASE,
+        PRIVATE_API_SECRET=SecretStr("private-secret"),
+        HEALTH_DETAIL_CREDENTIAL=SecretStr("health-secret"),
+        METRICS_SCRAPE_CREDENTIAL=SecretStr("metrics-secret"),
+    )
+    a = create_app(s, test_router)
+    async with a.router.lifespan_context(a):
+        pass
+    assert a.state.service_ready is True
 
 
 # ── Health checks ─────────────────────────────────────────────────────────────
