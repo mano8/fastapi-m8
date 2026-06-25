@@ -394,7 +394,12 @@ No second Redis, no broker: consumers speak HTTPS to fa-auth, which they already
 > HTTP authority path alone.
 
 Wire it in your lifespan with `build_event_stream_client`, which constructs the SDK's
-`AuthEventStreamClient` from your settings (no SDK internals needed):
+`AuthEventStreamClient` from your settings (no SDK internals needed). The factory uses
+the same internal-auth provider as the revocation client — the stream credential is
+therefore **a single config knob** shared with JTI introspection: legacy
+`X-Internal-Token`, per-consumer bootstrap, or short-TTL `Authorization: Bearer` service
+token, selected by `INTERNAL_CLIENT_ID` / `SERVICE_TOKEN_EXCHANGE_ENABLED` (see
+*Per-consumer internal auth* above).
 
 ```python
 from contextlib import asynccontextmanager
@@ -429,9 +434,9 @@ async def lifespan(app: FastAPI):
 
 The client verifies every payload's HMAC signature with `EVENT_SIGNING_KEY` (must match
 fa-auth), auto-reconnects with jittered backoff, resumes via `Last-Event-ID`, and **never
-raises into the host app**. Requires `TOKEN_MODE=stateful` so `INTROSPECTION_URL` and
-`PRIVATE_API_SECRET` are present. Behind a reverse proxy, disable response buffering on
-the stream endpoint so events and heartbeats pass through promptly.
+raises into the host app**. Requires `TOKEN_MODE=stateful` so `INTROSPECTION_URL` is set.
+Behind a reverse proxy, disable response buffering on the stream endpoint so events and
+heartbeats pass through promptly.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|

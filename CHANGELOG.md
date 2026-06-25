@@ -5,6 +5,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [3.2.0] — 2026-06-25 · event-stream 9.1 follow-on — provider routing (auth-sdk-m8 2.1.0)
+
+> **MINOR — additive, backward-compatible.** Default behaviour is unchanged: a consumer
+> with none of the 9.1 settings (`INTERNAL_CLIENT_ID` unset) keeps the legacy
+> `X-Internal-Token` behaviour. Raises the `auth-sdk-m8` floor to `>=2.1.0` — the minimum
+> that ships `AuthEventStreamClient(auth_provider=…)` and
+> `auth_sdk_m8.security.internal_auth`.
+
+### Changed
+
+- **`build_event_stream_client` routes through `build_internal_auth` (item 9.1 event-stream
+  follow-on).** The SSE stream now authenticates via the same
+  :class:`~fastapi_m8._internal_auth.InternalAuthProvider` the revocation client uses,
+  selected purely by config:
+  - **legacy** (`INTERNAL_CLIENT_ID` unset) — single `X-Internal-Token`, unchanged;
+  - **bootstrap** (`INTERNAL_CLIENT_ID` set) — `X-Internal-Client` + `X-Internal-Token`
+    on every reconnect;
+  - **service token** (`+ SERVICE_TOKEN_EXCHANGE_ENABLED`) — short-TTL `Authorization:
+    Bearer` token, re-minted on reconnect / `401`.
+
+  The factory no longer constructs a bare `private_api_secret` path — it always passes
+  `auth_provider` to `AuthEventStreamClient`, which owns the provider lifecycle and closes
+  it on `stop()`. The `auth-sdk-m8 >=2.1.0` requirement is the only change visible to
+  operators; consumer settings are unchanged.
+
+- **`auth-sdk-m8` floor raised to `>=2.1.0`** (was `>=2.0.1`). `2.1.0` ships the
+  `auth_provider` parameter on `AuthEventStreamClient` and the framework-agnostic
+  `auth_sdk_m8.security.internal_auth` module (`InternalAuthProvider` protocol,
+  `StaticInternalAuth`, `static_internal_auth`). The `<3.0.0` ceiling is unchanged.
+
+- `COMPAT_MATRIX` gains a `3.2` entry (`auth-sdk-m8 >=2.1.0,<3.0.0`).
+
+---
+
 ## [3.1.0] — 2026-06-24 · consumer-side post-1.0 remediation (9.1 / 5.5 / 7.x.1 / 9.2 / 10.1)
 
 > **MINOR — additive, backward-compatible.** Default behaviour is unchanged: a consumer

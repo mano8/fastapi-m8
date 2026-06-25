@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from pydantic import SecretStr
 
@@ -13,6 +11,10 @@ from fastapi_m8 import (
     AuthStreamEvent,
     build_event_stream_client,
     derive_stream_url,
+)
+from fastapi_m8._internal_auth import (
+    ServiceTokenInternalAuth,
+    _StaticInternalAuth,
 )
 from tests.conftest import make_settings
 
@@ -60,7 +62,7 @@ def test_derive_stream_url_strips_jti_suffix() -> None:
 
 
 def test_build_event_stream_client_from_settings() -> None:
-    """Factory builds a client with derived URL and unwrapped secrets."""
+    """Factory builds a client with derived URL and a legacy auth provider."""
     settings = _stateful_settings()
     client = build_event_stream_client(
         settings,
@@ -69,12 +71,47 @@ def test_build_event_stream_client_from_settings() -> None:
     )
     assert isinstance(client, AuthEventStreamClient)
     assert client._url == "http://auth:8000/user/private/v1/events/stream"
-    assert client._secret == "supersecret"
-    # EVENT_SIGNING_KEY (VALID_KEY) is unwrapped from SecretStr.
+    # Legacy mode (no INTERNAL_CLIENT_ID) → static provider with X-Internal-Token.
+    assert isinstance(client._auth, _StaticInternalAuth)
+    # EVENT_SIGNING_KEY is unwrapped from SecretStr.
     assert client._signing_key is not None
     # Timeouts default from settings.
     assert client._connect_timeout == 5.0
     assert client._read_timeout == 60.0
+
+
+def test_build_event_stream_client_legacy_provider_headers() -> None:
+    """Legacy mode: provider emits only X-Internal-Token."""
+    import asyncio
+
+    settings = _stateful_settings()
+    client = build_event_stream_client(settings, on_event=_noop_event, on_gap=_noop_gap)
+    headers = asyncio.run(client._auth.headers())
+    assert headers == {"X-Internal-Token": "supersecret"}
+
+
+def test_build_event_stream_client_bootstrap_provider() -> None:
+    """Bootstrap mode: provider emits X-Internal-Client + X-Internal-Token."""
+    import asyncio
+
+    settings = _stateful_settings(INTERNAL_CLIENT_ID="media-svc")
+    client = build_event_stream_client(settings, on_event=_noop_event, on_gap=_noop_gap)
+    assert isinstance(client._auth, _StaticInternalAuth)
+    headers = asyncio.run(client._auth.headers())
+    assert headers == {
+        "X-Internal-Client": "media-svc",
+        "X-Internal-Token": "supersecret",
+    }
+
+
+def test_build_event_stream_client_service_token_provider() -> None:
+    """Service-token mode: provider is ServiceTokenInternalAuth."""
+    settings = _stateful_settings(
+        INTERNAL_CLIENT_ID="media-svc",
+        SERVICE_TOKEN_EXCHANGE_ENABLED=True,
+    )
+    client = build_event_stream_client(settings, on_event=_noop_event, on_gap=_noop_gap)
+    assert isinstance(client._auth, ServiceTokenInternalAuth)
 
 
 def test_build_event_stream_client_timeout_overrides_from_settings() -> None:
@@ -123,25 +160,6 @@ def test_build_event_stream_client_signing_disabled() -> None:
     assert client._signing_key is None
 
 
-def test_build_event_stream_client_plain_string_attrs() -> None:
-    """Plain-string secret/signing attrs (no SecretStr) are accepted."""
-    settings = SimpleNamespace(
-        INTROSPECTION_URL="http://auth:8000/user/private/v1/jti-status",
-        PRIVATE_API_SECRET="plain-secret",
-        EVENT_SIGNING_KEY="plain-signing-key",
-    )
-    client = build_event_stream_client(
-        settings,
-        on_event=_noop_event,
-        on_gap=_noop_gap,
-    )
-    assert client._secret == "plain-secret"
-    assert client._signing_key == "plain-signing-key"
-    # No EVENT_STREAM_* attrs on the namespace → fall back to library defaults.
-    assert client._connect_timeout == 5.0
-    assert client._read_timeout == 60.0
-
-
 # ── factory: error paths ────────────────────────────────────────────────────
 
 
@@ -149,21 +167,6 @@ def test_build_event_stream_client_requires_introspection_url() -> None:
     """Missing INTROSPECTION_URL is a configuration error."""
     settings = make_settings()  # stateless default → INTROSPECTION_URL is None
     with pytest.raises(ValueError, match="INTROSPECTION_URL"):
-        build_event_stream_client(
-            settings,
-            on_event=_noop_event,
-            on_gap=_noop_gap,
-        )
-
-
-def test_build_event_stream_client_requires_private_api_secret() -> None:
-    """Missing PRIVATE_API_SECRET is a configuration error."""
-    settings = SimpleNamespace(
-        INTROSPECTION_URL="http://auth:8000/user/private/v1/jti-status",
-        PRIVATE_API_SECRET=None,
-        EVENT_SIGNING_KEY="k",
-    )
-    with pytest.raises(ValueError, match="PRIVATE_API_SECRET"):
         build_event_stream_client(
             settings,
             on_event=_noop_event,

@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 _JTI_STATUS_SUFFIX = "/jti-status"
-_SERVICE_TOKEN_SUFFIX = "/service-token"
+_SERVICE_TOKEN_SUFFIX = "/service-token"  # nosec B105 — URL path, not a password
 _AUTHORIZATION_HEADER = "Authorization"
 
 
