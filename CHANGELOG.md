@@ -5,50 +5,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [3.2.0] — 2026-06-25 · event-stream 9.1 follow-on — provider routing (auth-sdk-m8 2.1.0)
-
-> **MINOR — additive, backward-compatible.** Default behaviour is unchanged: a consumer
-> with none of the 9.1 settings (`INTERNAL_CLIENT_ID` unset) keeps the legacy
-> `X-Internal-Token` behaviour. Raises the `auth-sdk-m8` floor to `>=2.1.0` — the minimum
-> that ships `AuthEventStreamClient(auth_provider=…)` and
-> `auth_sdk_m8.security.internal_auth`.
-
-### Changed
-
-- **`build_event_stream_client` routes through `build_internal_auth` (item 9.1 event-stream
-  follow-on).** The SSE stream now authenticates via the same
-  :class:`~fastapi_m8._internal_auth.InternalAuthProvider` the revocation client uses,
-  selected purely by config:
-  - **legacy** (`INTERNAL_CLIENT_ID` unset) — single `X-Internal-Token`, unchanged;
-  - **bootstrap** (`INTERNAL_CLIENT_ID` set) — `X-Internal-Client` + `X-Internal-Token`
-    on every reconnect;
-  - **service token** (`+ SERVICE_TOKEN_EXCHANGE_ENABLED`) — short-TTL `Authorization:
-    Bearer` token, re-minted on reconnect / `401`.
-
-  The factory no longer constructs a bare `private_api_secret` path — it always passes
-  `auth_provider` to `AuthEventStreamClient`, which owns the provider lifecycle and closes
-  it on `stop()`. The `auth-sdk-m8 >=2.1.0` requirement is the only change visible to
-  operators; consumer settings are unchanged.
-
-- **`auth-sdk-m8` floor raised to `>=2.1.0`** (was `>=2.0.1`). `2.1.0` ships the
-  `auth_provider` parameter on `AuthEventStreamClient` and the framework-agnostic
-  `auth_sdk_m8.security.internal_auth` module (`InternalAuthProvider` protocol,
-  `StaticInternalAuth`, `static_internal_auth`). The `<3.0.0` ceiling is unchanged.
-
-- `COMPAT_MATRIX` gains a `3.2` entry (`auth-sdk-m8 >=2.1.0,<3.0.0`).
-
----
-
-## [3.1.0] — 2026-06-24 · consumer-side post-1.0 remediation (9.1 / 5.5 / 7.x.1 / 9.2 / 10.1)
+## [3.1.0] — 2026-06-24/25 · consumer-side post-1.0 remediation (9.1 / 5.5 / 7.x.1 / 9.2 / 10.1) + event-stream 9.1 follow-on
 
 > **MINOR — additive, backward-compatible.** Default behaviour is unchanged: a consumer
 > with none of the new settings set keeps the legacy single `PRIVATE_API_SECRET`
 > (`X-Internal-Token`) posture and the existing fail-closed revocation path. The post-1.0
 > breaking removals (retiring the shared `PRIVATE_API_SECRET` model) remain **deferred** —
-> published `fastapi-m8 3.0.0` / `auth-sdk-m8 2.0.1` are not yet consumed by any live
-> issuer/consumer stack, so this remediation wave folds into a minor rather than forcing a
-> new major. Requires `auth-sdk-m8 >= 2.0.1, < 3.0.0` (unchanged floor — the 9.1
-> verification primitives shipped additively in SDK 2.0.0).
+> `fastapi-m8 3.0.0` / `auth-sdk-m8 2.0.1` are not yet consumed by any live issuer/consumer
+> stack, so this remediation wave folds into a minor rather than forcing a new major.
+> Requires `auth-sdk-m8 >= 2.1.0, < 3.0.0` (floor raised from 2.0.1 by the event-stream
+> follow-on item — `auth_provider` on `AuthEventStreamClient` landed in SDK 2.1.0).
 
 ### Added
 
@@ -79,17 +45,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ### Changed
 
+- **`build_event_stream_client` routes through `build_internal_auth` (item 9.1 event-stream
+  follow-on, 2026-06-25).** The SSE stream now authenticates via the same
+  `InternalAuthProvider` the revocation client uses, selected purely by config (legacy /
+  bootstrap / service-token). The factory always passes `auth_provider` to
+  `AuthEventStreamClient`, which owns the provider lifecycle and closes it on `stop()`.
+  Consumer settings are unchanged; the only external requirement change is the SDK floor
+  bump to `>=2.1.0`.
+- **`auth-sdk-m8` floor raised to `>=2.1.0`** (was `>=2.0.1`). `2.1.0` ships the
+  `auth_provider` parameter on `AuthEventStreamClient` and the framework-agnostic
+  `auth_sdk_m8.security.internal_auth` module. The `<3.0.0` ceiling is unchanged.
 - **README (item 10.1).** New *Per-consumer internal auth* subsection and a *Defaults by
   layer (consumer)* table documenting the consumer column (auto-run config-health,
   `ALLOWED_HOSTS` inheritance, `METRICS_SCRAPE_CREDENTIAL`, `_FILE` inheritance,
-  `ACCESS_REVOCATION_FAILURE_MODE`).
+  `ACCESS_REVOCATION_FAILURE_MODE`). Event-stream section updated to note the shared
+  credential provider.
 - **Event-signing rollout flags surfaced for consumers (item 7.x.1).** `.env.example`
   documents `EVENT_SIGNING_ENABLED` / `EVENT_SIGNING_ACCEPT_UNSIGNED` and their strict
   config-health gate (fatal under `STRICT_PRODUCTION_MODE`; `ACCEPT_UNSIGNED` also fatal
   under `ENVIRONMENT=production`). The gate is auto-run via `create_app`; a consumer-side
   test asserts it fires. `.env.example` also gains the new 9.1 vars and
   `REVOCATION_CACHE_TTL_SECONDS`.
-- `COMPAT_MATRIX` gains a `3.1` entry (same `auth-sdk-m8 >=2.0.1,<3.0.0` floor as 3.0).
+- `COMPAT_MATRIX` `3.1` entry updated to `auth-sdk-m8 >=2.1.0,<3.0.0` (reflects the
+  event-stream `auth_provider` requirement).
 
 ---
 
