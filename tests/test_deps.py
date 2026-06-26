@@ -244,8 +244,9 @@ async def test_get_current_user_revoked_token_raises_403() -> None:
 
 
 @pytest.mark.anyio
-async def test_get_current_user_revocation_error_raises_503() -> None:
+async def test_get_current_user_revocation_error_raises_503(caplog) -> None:
     """RevocationCheckError → 503 HTTPException."""
+    raw_jti = "jti-secret-log-value"
     s = make_settings(
         TOKEN_MODE="stateful",
         INTROSPECTION_URL="http://auth:8000/private/v1/jti-status",
@@ -257,9 +258,13 @@ async def test_get_current_user_revocation_error_raises_503() -> None:
         side_effect=RevocationCheckError("timeout")
     )
 
-    with pytest.raises(HTTPException) as exc_info:
-        await auth.get_current_user(make_access_token())
+    with caplog.at_level(logging.WARNING, logger="fastapi_m8._deps"):
+        with pytest.raises(HTTPException) as exc_info:
+            await auth.get_current_user(make_access_token(extra={"jti": raw_jti}))
     assert exc_info.value.status_code == 503
+    assert "security.revocation_denied" in caplog.text
+    assert raw_jti not in caplog.text
+    assert "jti=" not in caplog.text
 
 
 # ── 5.5 consumer-side degradation matrix (end-to-end through get_current_user) ──

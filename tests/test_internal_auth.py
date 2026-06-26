@@ -1,7 +1,6 @@
 """Tests for fastapi_m8._internal_auth — per-consumer private-call auth (9.1)."""
 
 import logging
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -9,11 +8,13 @@ from pydantic import SecretStr
 
 from fastapi_m8._internal_auth import (
     ServiceTokenInternalAuth,
+    _secret_value,
     _StaticInternalAuth,
     build_internal_auth,
     derive_service_token_url,
     describe_internal_auth_mode,
 )
+from tests.conftest import IsolatedConsumerSettings, make_settings
 
 pytestmark = pytest.mark.anyio
 
@@ -21,7 +22,7 @@ _SECRET = "bootstrap-secret"
 _INTROSPECTION = "http://auth:8000/private/v1/jti-status"
 
 
-def _settings(**overrides) -> SimpleNamespace:
+def _settings(**overrides: object) -> IsolatedConsumerSettings:
     """Build a settings stub carrying just the internal-auth fields."""
     base = {
         "PRIVATE_API_SECRET": SecretStr(_SECRET),
@@ -32,7 +33,7 @@ def _settings(**overrides) -> SimpleNamespace:
         "SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS": 30,
     }
     base.update(overrides)
-    return SimpleNamespace(**base)
+    return make_settings(**base)
 
 
 # ── derive_service_token_url ──────────────────────────────────────────────────
@@ -101,8 +102,7 @@ async def test_service_token_mode_honours_explicit_scopes() -> None:
 
 def test_build_internal_auth_accepts_plain_str_secret() -> None:
     """_secret_value falls back to str() for a non-SecretStr value."""
-    provider = build_internal_auth(_settings(PRIVATE_API_SECRET="plain"))
-    assert isinstance(provider, _StaticInternalAuth)
+    assert _secret_value("plain") == "plain"
 
 
 # ── describe_internal_auth_mode ───────────────────────────────────────────────
@@ -140,15 +140,16 @@ def _exchange_resp(token: str = "minted-token", expires_in: int = 300):
     return resp
 
 
-def _make_service_auth(**kwargs) -> ServiceTokenInternalAuth:
-    params = {
-        "client_id": "svc-a",
-        "secret": _SECRET,
-        "exchange_url": "http://auth:8000/private/v1/service-token",
-        "scopes": ["introspection"],
-    }
-    params.update(kwargs)
-    return ServiceTokenInternalAuth(**params)
+def _make_service_auth(
+    *, scopes: list[str] | None = None, refresh_leeway: int = 30
+) -> ServiceTokenInternalAuth:
+    return ServiceTokenInternalAuth(
+        client_id="svc-a",
+        secret=_SECRET,
+        exchange_url="http://auth:8000/private/v1/service-token",
+        scopes=["introspection"] if scopes is None else scopes,
+        refresh_leeway=refresh_leeway,
+    )
 
 
 async def test_service_token_exchange_returns_bearer() -> None:

@@ -233,18 +233,15 @@ class RemoteRevocationClient:
             return not active
         except Exception as exc:
             mode = "fail_closed" if self._fail_closed else "fail_open"
-            _logger.warning(
-                "revocation.check_failed jti=%s mode=%s error=%s", jti, mode, exc
-            )
+            _logger.warning("revocation.check_failed mode=%s error=%s", mode, exc)
             self._record_check_failure(mode)
             if self._fail_closed:
                 raise RevocationCheckError(str(exc)) from exc
             # Conscious availability-over-safety opt-out — surfaced loudly so it
             # never passes silently (logged here + counted in metrics above).
             _logger.warning(
-                "security.revocation_fail_open jti=%s — token accepted despite "
-                "unverifiable revocation (ACCESS_REVOCATION_FAILURE_MODE opt-out)",
-                jti,
+                "security.revocation_fail_open token accepted despite "
+                "unverifiable revocation (ACCESS_REVOCATION_FAILURE_MODE opt-out)"
             )
             return False
 

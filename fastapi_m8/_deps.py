@@ -54,11 +54,7 @@ async def _check_token_revocation(
                 detail="Token has been revoked.",
             )
     except RevocationCheckError as ex:
-        _logger.warning(
-            "security.revocation_denied jti=%s reason=unverifiable error=%s",
-            jti,
-            ex,
-        )
+        _logger.warning("security.revocation_denied reason=unverifiable error=%s", ex)
         raise HTTPException(
             status_code=_UNAVAILABLE,
             detail="Token revocation check unavailable.",

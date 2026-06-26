@@ -523,12 +523,15 @@ async def test_fail_open_accepts_logs_and_counts_optout(fresh_metrics, caplog) -
     """fail_open opt-out: token accepted, logged loudly, and counted mode=fail_open."""
     import logging
 
+    raw_jti = "jti-secret-log-value"
     client = _make_client(fail_closed=False)
     setattr(client._client, "post", AsyncMock(side_effect=httpx.ConnectError("down")))
 
     with caplog.at_level(logging.WARNING, logger="fastapi_m8._revocation"):
-        assert await client.is_revoked("jti-1") is False
+        assert await client.is_revoked(raw_jti) is False
     assert "security.revocation_fail_open" in caplog.text
+    assert raw_jti not in caplog.text
+    assert "jti=" not in caplog.text
     reg = fresh_metrics.REGISTRY
     assert _sv(reg, "revocation_check_failures_total", {"mode": "fail_open"}) == 1.0
     assert _sv(reg, "revocation_check_failures_total", {"mode": "fail_closed"}) == 0.0
