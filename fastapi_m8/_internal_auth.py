@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 _JTI_STATUS_SUFFIX = "/jti-status"
-_SERVICE_TOKEN_SUFFIX = "/service-token"  # nosec B105 — URL path, not a password
+_SERVICE_TOKEN_SUFFIX = "/service-token"  # noqa: S105  # nosec B105 — URL path, not a password
 _AUTHORIZATION_HEADER = "Authorization"
 
 
@@ -167,7 +167,7 @@ class ServiceTokenInternalAuth:
         self._token = token
         self._expires_at = time.monotonic() + max(0, expires_in - self._leeway)
         # Log identity + lifetime only — never the bootstrap secret or token.
-        _logger.info(
+        _logger.info(  # nosemgrep — logs client id + lifetime only, never a secret
             "internal_auth.service_token refreshed client=%s expires_in=%d",
             self._client_id,
             expires_in,
