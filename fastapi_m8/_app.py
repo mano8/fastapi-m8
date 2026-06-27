@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 import anyio
 from auth_sdk_m8.controllers.meta import mount_service_meta
 from auth_sdk_m8.core.config import check_config_health
+from auth_sdk_m8.core.exceptions import ConfigurationError
 from auth_sdk_m8.security.guards import (
     make_internal_token_authorizer,
     make_scrape_credential_guard,
@@ -150,6 +151,28 @@ def _build_lifespan(
     return lifespan
 
 
+def _check_credential_no_reuse(settings: ConsumerServiceSettings) -> None:
+    """Raise ConfigurationError when an operational credential reuses PRIVATE_API_SECRET."""
+    pri = settings.PRIVATE_API_SECRET
+    if pri is None:
+        return
+    pri_val = pri.get_secret_value()
+    health_cred = settings.HEALTH_DETAIL_CREDENTIAL
+    if health_cred and health_cred.get_secret_value() == pri_val:
+        raise ConfigurationError(
+            "CONFIG: HEALTH_DETAIL_CREDENTIAL must not equal PRIVATE_API_SECRET — "
+            "operational credentials must be independently rotatable from the "
+            "private-API bootstrap secret (item 9.3). Set a distinct value."
+        )
+    metrics_cred = settings.METRICS_SCRAPE_CREDENTIAL
+    if metrics_cred and metrics_cred.get_secret_value() == pri_val:
+        raise ConfigurationError(
+            "CONFIG: METRICS_SCRAPE_CREDENTIAL must not equal PRIVATE_API_SECRET — "
+            "operational credentials must be independently rotatable from the "
+            "private-API bootstrap secret (item 9.3). Set a distinct value."
+        )
+
+
 def _build_config_health_validator(
     settings: ConsumerServiceSettings,
 ) -> StartupValidator:
@@ -163,6 +186,7 @@ def _build_config_health_validator(
 
     async def _validate_config_health() -> None:
         check_config_health(settings, logger)
+        _check_credential_no_reuse(settings)
 
     return _validate_config_health
 
@@ -191,9 +215,9 @@ def _add_metrics_middleware(app: FastAPI, settings: ConsumerServiceSettings) -> 
 def _build_default_authorizer(
     settings: ConsumerServiceSettings,
 ) -> Callable[[Request], bool]:
-    """Return a token authorizer closed over the private API secret."""
-    sec = settings.PRIVATE_API_SECRET
-    return make_internal_token_authorizer(sec.get_secret_value() if sec else None)
+    """Return a predicate gating /health detail on HEALTH_DETAIL_CREDENTIAL (fail-closed)."""
+    cred = settings.HEALTH_DETAIL_CREDENTIAL
+    return make_internal_token_authorizer(cred.get_secret_value() if cred else None)
 
 
 def _register_metrics_route(app: FastAPI, settings: ConsumerServiceSettings) -> None:

@@ -244,8 +244,9 @@ async def test_get_current_user_revoked_token_raises_403() -> None:
 
 
 @pytest.mark.anyio
-async def test_get_current_user_revocation_error_raises_503() -> None:
+async def test_get_current_user_revocation_error_raises_503(caplog) -> None:
     """RevocationCheckError → 503 HTTPException."""
+    raw_jti = "jti-secret-log-value"
     s = make_settings(
         TOKEN_MODE="stateful",
         INTROSPECTION_URL="http://auth:8000/private/v1/jti-status",
@@ -257,9 +258,51 @@ async def test_get_current_user_revocation_error_raises_503() -> None:
         side_effect=RevocationCheckError("timeout")
     )
 
+    with caplog.at_level(logging.WARNING, logger="fastapi_m8._deps"):
+        with pytest.raises(HTTPException) as exc_info:
+            await auth.get_current_user(make_access_token(extra={"jti": raw_jti}))
+    assert exc_info.value.status_code == 503
+    assert "security.revocation_denied" in caplog.text
+    assert raw_jti not in caplog.text
+    assert "jti=" not in caplog.text
+
+
+# ── 5.5 consumer-side degradation matrix (end-to-end through get_current_user) ──
+
+
+@pytest.mark.anyio
+async def test_fail_closed_introspection_down_returns_503() -> None:
+    """fail_closed + unreachable introspection → get_current_user raises 503."""
+    import httpx
+
+    auth = _stateful_auth(ACCESS_REVOCATION_FAILURE_MODE="fail_closed")
+    assert auth.revocation_client is not None
+    setattr(
+        auth.revocation_client._client,
+        "post",
+        AsyncMock(side_effect=httpx.ConnectError("down")),
+    )
     with pytest.raises(HTTPException) as exc_info:
         await auth.get_current_user(make_access_token())
     assert exc_info.value.status_code == 503
+    await auth.close()
+
+
+@pytest.mark.anyio
+async def test_fail_open_introspection_down_accepts_token() -> None:
+    """fail_open opt-out + unreachable introspection → token is accepted."""
+    import httpx
+
+    auth = _stateful_auth(ACCESS_REVOCATION_FAILURE_MODE="fail_open")
+    assert auth.revocation_client is not None
+    setattr(
+        auth.revocation_client._client,
+        "post",
+        AsyncMock(side_effect=httpx.ConnectError("down")),
+    )
+    user = await auth.get_current_user(make_access_token())
+    assert isinstance(user, UserModel)
+    await auth.close()
 
 
 # ── get_current_active_admin ──────────────────────────────────────────────────

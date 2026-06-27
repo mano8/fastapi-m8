@@ -11,8 +11,13 @@ import logging
 import time
 
 import httpx
+from auth_sdk_m8.security.guards import INTERNAL_TOKEN_HEADER
+
+from fastapi_m8._internal_auth import InternalAuthProvider, _StaticInternalAuth
 
 _logger = logging.getLogger(__name__)
+
+_UNAUTHORIZED = 401
 
 
 def _get_obs():
@@ -39,9 +44,10 @@ class _CacheMetrics:
     acceptance criterion "keys/secrets are never logged" holds for metrics too.
     """
 
-    def __init__(self, lookups, ttl_seconds) -> None:  # noqa: ANN001
+    def __init__(self, lookups, ttl_seconds, check_failures) -> None:  # noqa: ANN001
         self.lookups = lookups
         self.ttl_seconds = ttl_seconds
+        self.check_failures = check_failures
 
 
 # (registry, metrics) — rebuilt when the SDK swaps its registry (tests do this).
@@ -77,6 +83,14 @@ def _get_cache_metrics() -> _CacheMetrics | None:
             "revocation_cache_ttl_seconds",
             "Configured revocation-cache stale-window TTL in seconds "
             "(0 = caching disabled)",
+            registry=registry,
+        ),
+        check_failures=Counter(
+            "revocation_check_failures_total",
+            "JTI revocation-check failures by configured failure mode — a "
+            "fail_open count is a conscious availability-over-safety opt-out "
+            "(mode: fail_open | fail_closed)",
+            ["mode"],
             registry=registry,
         ),
     )
@@ -149,20 +163,34 @@ class RemoteRevocationClient:
     ``active=True`` results are cached for *cache_ttl* seconds, skipping the
     HTTP call on subsequent requests for the same JTI.  Set to ``0`` (default)
     to disable caching and always call fa-auth.
+
+    Private-call authentication is delegated to an
+    :class:`~fastapi_m8._internal_auth.InternalAuthProvider` (Phase 9.1): pass an
+    ``auth_provider`` to use per-consumer credentials or short-TTL service
+    tokens, or pass ``private_api_secret`` to keep the legacy single
+    ``X-Internal-Token`` behaviour.  Exactly one must be supplied.
     """
 
     def __init__(
         self,
         *,
         introspection_url: str,
-        private_api_secret: str,
+        private_api_secret: str | None = None,
+        auth_provider: InternalAuthProvider | None = None,
         connect_timeout: float = 2.0,
         read_timeout: float = 3.0,
         fail_closed: bool = True,
         cache_ttl: int = 0,
     ) -> None:
-        """Initialise the HTTP client with auth headers and timeouts."""
+        """Initialise the HTTP client, auth provider, and timeouts."""
+        if (private_api_secret is None) == (auth_provider is None):
+            raise ValueError(
+                "provide exactly one of private_api_secret or auth_provider"
+            )
         self._url = introspection_url
+        self._auth: InternalAuthProvider = auth_provider or _StaticInternalAuth(
+            {INTERNAL_TOKEN_HEADER: private_api_secret}  # type: ignore[dict-item]
+        )
         self._fail_closed = fail_closed
         self._cache_ttl = cache_ttl
         self._cache: JtiRevocationCache | None = (
@@ -172,7 +200,6 @@ class RemoteRevocationClient:
             # TTL only — never the introspection URL host or any secret.
             _logger.info("revocation.cache enabled ttl_seconds=%d", cache_ttl)
         self._client = httpx.AsyncClient(
-            headers={"X-Internal-Token": private_api_secret},
             timeout=httpx.Timeout(
                 connect=connect_timeout,
                 read=read_timeout,
@@ -200,17 +227,50 @@ class RemoteRevocationClient:
                 return cached  # False = not revoked (active cached)
             self._record_lookup("miss")
         try:
-            response = await self._client.post(self._url, json={"jti": jti})
-            response.raise_for_status()
-            active = response.json()["active"]
+            active = await self._query_active(jti)
             if active and self._cache is not None:
                 self._cache.put(jti, user_id)
             return not active
         except Exception as exc:
-            _logger.warning("revocation.check_failed jti=%s error=%s", jti, exc)
+            mode = "fail_closed" if self._fail_closed else "fail_open"
+            _logger.warning("revocation.check_failed mode=%s error=%s", mode, exc)
+            self._record_check_failure(mode)
             if self._fail_closed:
                 raise RevocationCheckError(str(exc)) from exc
+            # Conscious availability-over-safety opt-out — surfaced loudly so it
+            # never passes silently (logged here + counted in metrics above).
+            _logger.warning(
+                "security.revocation_fail_open token accepted despite "
+                "unverifiable revocation (ACCESS_REVOCATION_FAILURE_MODE opt-out)"
+            )
             return False
+
+    async def _query_active(self, jti: str) -> bool:
+        """
+        POST the JTI-status check and return the ``active`` flag.
+
+        On a ``401`` the auth provider is invalidated; if that signals a retry is
+        worthwhile (service-token mode — the token was rejected), the credential
+        is re-minted and the call is retried **once**.  Static modes (legacy /
+        bootstrap) do not retry: a 401 there means a misconfigured secret.
+        """
+        try:
+            response = await self._post(jti)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != _UNAUTHORIZED or not (
+                await self._auth.invalidate()
+            ):
+                raise
+            response = await self._post(jti)
+        return response.json()["active"]
+
+    async def _post(self, jti: str) -> httpx.Response:
+        """Send one authenticated JTI-status request and raise on HTTP error."""
+        response = await self._client.post(
+            self._url, json={"jti": jti}, headers=await self._auth.headers()
+        )
+        response.raise_for_status()
+        return response
 
     def _record_lookup(self, result: str) -> None:
         """
@@ -226,6 +286,19 @@ class RemoteRevocationClient:
             return
         cache_metrics.lookups.labels(result=result).inc()
         cache_metrics.ttl_seconds.set(self._cache_ttl)
+
+    def _record_check_failure(self, mode: str) -> None:
+        """
+        Count a revocation-check failure by mode (``fail_open``/``fail_closed``).
+
+        Best-effort and no-op without observability. Carries only the ``mode``
+        dimension — never a JTI, user id, or secret — so the "no identifiers in
+        metrics" acceptance criterion holds.
+        """
+        cache_metrics = _get_cache_metrics()
+        if cache_metrics is None:
+            return
+        cache_metrics.check_failures.labels(mode=mode).inc()
 
     def evict_jti(self, jti: str) -> None:
         """Remove one JTI from the cache (no-op when cache is disabled)."""
@@ -243,5 +316,6 @@ class RemoteRevocationClient:
             self._cache.flush_all()
 
     async def close(self) -> None:
-        """Close the underlying httpx session."""
+        """Close the underlying httpx session and the auth provider."""
         await self._client.aclose()
+        await self._auth.close()

@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
 from fastapi_m8._compat import _assert_compat
+from fastapi_m8._internal_auth import build_internal_auth, describe_internal_auth_mode
 from fastapi_m8._revocation import RemoteRevocationClient, RevocationCheckError
 
 if TYPE_CHECKING:
@@ -53,11 +54,7 @@ async def _check_token_revocation(
                 detail="Token has been revoked.",
             )
     except RevocationCheckError as ex:
-        _logger.warning(
-            "security.revocation_denied jti=%s reason=unverifiable error=%s",
-            jti,
-            ex,
-        )
+        _logger.warning("security.revocation_denied reason=unverifiable error=%s", ex)
         raise HTTPException(
             status_code=_UNAVAILABLE,
             detail="Token revocation check unavailable.",
@@ -185,9 +182,13 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
             settings.ACCESS_REVOCATION_FAILURE_MODE,
             settings.AUTH_STRICT_MODE,
         )
+        # Per-consumer internal-auth (9.1): legacy single-secret, per-consumer
+        # bootstrap headers, or short-TTL service-token exchange — selected by
+        # config. Log the mode only (never the client id or any secret).
+        _logger.info("internal_auth.mode=%s", describe_internal_auth_mode(settings))
         revocation_client = RemoteRevocationClient(
             introspection_url=str(settings.INTROSPECTION_URL),
-            private_api_secret=settings.PRIVATE_API_SECRET.get_secret_value(),  # type: ignore[union-attr]
+            auth_provider=build_internal_auth(settings),
             fail_closed=(revocation_mode == "fail_closed"),
             cache_ttl=settings.REVOCATION_CACHE_TTL_SECONDS,
         )

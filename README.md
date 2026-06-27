@@ -357,9 +357,28 @@ Required only when `TOKEN_MODE=stateful` and `AUTH_SERVICE_ROLE=consumer`.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `INTROSPECTION_URL` | Yes | — | `POST` endpoint on auth service for JTI revocation checks, e.g. `http://auth_user_service:8000/user/private/v1/jti-status` |
-| `PRIVATE_API_SECRET` | Yes | — | Shared secret for `X-Internal-Token` header (must match auth service) |
-| `ACCESS_REVOCATION_FAILURE_MODE` | No | `fail_closed` | `fail_closed` (default, secure — reject tokens when the check is unverifiable) or `fail_open` (accept on network/HTTP error). |
+| `PRIVATE_API_SECRET` | Yes | — | The credential for private calls. In **legacy** mode it is the single shared secret sent as `X-Internal-Token` (must match auth service); in **per-consumer** mode (see below) it carries *this* consumer's bootstrap secret. |
+| `ACCESS_REVOCATION_FAILURE_MODE` | No | `fail_closed` | `fail_closed` (default, secure — reject tokens when the check is unverifiable, returning **503**) or `fail_open` (accept on network/HTTP error — the opt-out is logged loudly and counted as `revocation_check_failures_total{mode="fail_open"}`). |
 | `REVOCATION_CACHE_TTL_SECONDS` | No | `0` | Short-TTL positive validation cache. `0` (default) disables it — every request calls fa-auth. Set to e.g. `30` to trust an `active=True` result for 30 s, skipping the HTTP round-trip; stream events (`session-revoked`/`user-deleted`) evict affected entries and an unresumable gap flushes all (requires the event-stream client). |
+
+#### Per-consumer internal auth (item 9.1)
+
+By default a consumer authenticates private calls with the single shared
+`PRIVATE_API_SECRET` (legacy mode), which matches fa-auth's fallback when it has no
+`PRIVATE_API_CONSUMERS` registry. Set `INTERNAL_CLIENT_ID` to switch to the
+**per-consumer** model: `PRIVATE_API_SECRET` becomes this service's *bootstrap*
+secret, fa-auth authorizes each private route by the credential's granted scope
+(deny-by-default), and the blast radius collapses from the whole fleet to one
+consumer. Optionally exchange the bootstrap credential for short-TTL `Authorization:
+Bearer` service tokens so rotation comes for free from the token TTL. Selection is
+purely by config — the home lab keeps working untouched.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `INTERNAL_CLIENT_ID` | No | — | This consumer's `X-Internal-Client` id. Unset = legacy single-secret mode; set = per-consumer bootstrap mode. |
+| `SERVICE_TOKEN_EXCHANGE_ENABLED` | No | `false` | Exchange the bootstrap credential for short-TTL Bearer service tokens at `{issuer}/private/v1/service-token` (requires `INTERNAL_CLIENT_ID`). |
+| `SERVICE_TOKEN_SCOPES` | No | `["introspection"]` | Scopes requested when minting a service token; fa-auth narrows to the subset the bootstrap credential was granted. |
+| `SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS` | No | `30` | Refresh a cached service token this many seconds before its `exp` so a call never races expiry. |
 
 ### Auth Event Stream (fa-auth SSE bridge)
 
@@ -375,7 +394,12 @@ No second Redis, no broker: consumers speak HTTPS to fa-auth, which they already
 > HTTP authority path alone.
 
 Wire it in your lifespan with `build_event_stream_client`, which constructs the SDK's
-`AuthEventStreamClient` from your settings (no SDK internals needed):
+`AuthEventStreamClient` from your settings (no SDK internals needed). The factory uses
+the same internal-auth provider as the revocation client — the stream credential is
+therefore **a single config knob** shared with JTI introspection: legacy
+`X-Internal-Token`, per-consumer bootstrap, or short-TTL `Authorization: Bearer` service
+token, selected by `INTERNAL_CLIENT_ID` / `SERVICE_TOKEN_EXCHANGE_ENABLED` (see
+*Per-consumer internal auth* above).
 
 ```python
 from contextlib import asynccontextmanager
@@ -410,9 +434,9 @@ async def lifespan(app: FastAPI):
 
 The client verifies every payload's HMAC signature with `EVENT_SIGNING_KEY` (must match
 fa-auth), auto-reconnects with jittered backoff, resumes via `Last-Event-ID`, and **never
-raises into the host app**. Requires `TOKEN_MODE=stateful` so `INTROSPECTION_URL` and
-`PRIVATE_API_SECRET` are present. Behind a reverse proxy, disable response buffering on
-the stream endpoint so events and heartbeats pass through promptly.
+raises into the host app**. Requires `TOKEN_MODE=stateful` so `INTROSPECTION_URL` is set.
+Behind a reverse proxy, disable response buffering on the stream endpoint so events and
+heartbeats pass through promptly.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -444,13 +468,24 @@ do not connect to Redis directly.
 | `REDIS_PASSWORD` | Redis password |
 | `REDIS_SSL` | Enable TLS (`true`/`false`, default `false`) |
 
+### Health Detail Gating (item 9.3)
+
+| Variable | Default | Description |
+|---|---|---|
+| `HEALTH_DETAIL_CREDENTIAL` | — | Optional credential for the `/health` detail body gate. When **unset**, `/health` returns only `{"status": "ok/fail"}` to all callers (fail-closed). When set, callers must present `X-Internal-Token: <value>` (constant-time match) to receive the full per-check breakdown. **Must not equal `PRIVATE_API_SECRET`** — accidental reuse is a fatal startup misconfiguration. Supports `_FILE` mount: set `HEALTH_DETAIL_CREDENTIAL_FILE=/run/secrets/health_cred.txt`. |
+
+> **No-reuse enforcement (item 9.3):** at startup, `create_app` asserts that neither
+> `HEALTH_DETAIL_CREDENTIAL` nor `METRICS_SCRAPE_CREDENTIAL` equals `PRIVATE_API_SECRET`.
+> This ensures each credential is independently rotatable — exposing one value cannot open
+> multiple surfaces. The check raises `ConfigurationError` (fail-closed), aborting startup.
+
 ### Observability
 
 | Variable | Default | Description |
 |---|---|---|
 | `METRICS_ENABLED` | `false` | Enable Prometheus metrics middleware and the `/metrics` route |
 | `METRICS_GROUPS` | — | Comma-separated groups: `traffic`, `performance`, `reliability`, `health`, `auth`, or `all` |
-| `METRICS_SCRAPE_CREDENTIAL` | — | Optional static bearer credential for the `/metrics` scrape endpoint. When set, requests must present `Authorization: Bearer <value>` (constant-time match). When unset, `/metrics` relies on network isolation only. |
+| `METRICS_SCRAPE_CREDENTIAL` | — | Optional static bearer credential for the `/metrics` scrape endpoint. When set, requests must present `Authorization: Bearer <value>` (constant-time match). When unset, `/metrics` relies on network isolation only. **Must not equal `PRIVATE_API_SECRET`**. |
 
 > **`/metrics` route:** when `METRICS_ENABLED=true`, `create_app` also registers a
 > `GET /metrics` endpoint (hidden from the schema) rendering the Prometheus registry.
@@ -521,6 +556,24 @@ locally before deploy).
 
 > These knobs are inherited from `CommonSettings`; consumer services do not redeclare
 > them. The same layer is shared by `fa-auth-m8` and every consumer.
+
+### Defaults by layer (consumer)
+
+How the security-critical settings behave specifically in the **fastapi-m8 consumer**
+layer. This is the consumer column of the fleet-wide defaults-by-layer table (the SDK and
+fa-auth-m8 READMEs hold the issuer/SDK columns). The throughline: secure-by-default,
+inherited from `auth-sdk-m8`, and made *fatal* only when pointed at production.
+
+| Control | Consumer behaviour | Becomes fatal when |
+|---|---|---|
+| Config-health gate | `create_app` **auto-runs** `check_config_health` in its lifespan before the app signals ready — no manual wiring | any fatal check trips (raises `ConfigurationError`, app refuses to boot) |
+| `ACCESS_REVOCATION_FAILURE_MODE` | `fail_closed` by default — an unverifiable revocation check returns **503**; `fail_open` is a conscious opt-out, logged loudly and counted (`revocation_check_failures_total{mode="fail_open"}`) | never fatal (it *is* the degradation policy) |
+| `ALLOWED_HOSTS` | inherited from `CommonSettings`; unset = no host check (dev) | unset under `STRICT_PRODUCTION_MODE` (strict fatal); wildcard `*` under strict |
+| `EVENT_SIGNING_ENABLED` / `EVENT_SIGNING_ACCEPT_UNSIGNED` | inherited secure defaults (signing on, unsigned rejected); the gate fires through the consumer's auto-run config-health (item 7.x.1) | `ENABLED=false` under strict; `ACCEPT_UNSIGNED=true` under production or strict |
+| `METRICS_SCRAPE_CREDENTIAL` | unset = `/metrics` relies on network isolation only; set = constant-time `Authorization: Bearer` gate. **Must not equal `PRIVATE_API_SECRET`** (fatal reuse check at startup). | never fatal (network-isolation is a valid posture); reuse of `PRIVATE_API_SECRET` is fatal |
+| `HEALTH_DETAIL_CREDENTIAL` (item 9.3) | unset = `/health` returns only shallow status to all callers (fail-closed, detail never shown); set = `X-Internal-Token` must match to receive the full per-check breakdown. **Must not equal `PRIVATE_API_SECRET`** (fatal reuse check at startup). | never fatal (no credential = no detail, which is a valid posture); reuse of `PRIVATE_API_SECRET` is fatal |
+| `INTERNAL_CLIENT_ID` (item 9.1) | unset = legacy single `PRIVATE_API_SECRET`; set = per-consumer bootstrap / service-token auth on private calls | never fatal (must be coordinated with the issuer's `PRIVATE_API_CONSUMERS`) |
+| `_FILE` secret mounts | **inherited** from `CommonSettings` — every secret (`PRIVATE_API_SECRET_FILE`, `DB_PASSWORD_FILE`, `METRICS_SCRAPE_CREDENTIAL_FILE`, `HEALTH_DETAIL_CREDENTIAL_FILE`, …) can be sourced from `/run/secrets/*` with no code change | a referenced `<FIELD>_FILE` path is missing (fails closed at construction) |
 
 ---
 

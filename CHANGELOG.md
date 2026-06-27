@@ -5,6 +5,72 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [3.1.0] — 2026-06-24/25 · consumer-side post-1.0 remediation (9.1 / 5.5 / 7.x.1 / 9.2 / 10.1) + event-stream 9.1 follow-on
+
+> **MINOR — additive, backward-compatible.** Default behaviour is unchanged: a consumer
+> with none of the new settings set keeps the legacy single `PRIVATE_API_SECRET`
+> (`X-Internal-Token`) posture and the existing fail-closed revocation path. The post-1.0
+> breaking removals (retiring the shared `PRIVATE_API_SECRET` model) remain **deferred** —
+> `fastapi-m8 3.0.0` / `auth-sdk-m8 2.0.1` are not yet consumed by any live issuer/consumer
+> stack, so this remediation wave folds into a minor rather than forcing a new major.
+> Requires `auth-sdk-m8 >= 2.1.0, < 3.0.0` (floor raised from 2.0.1 by the event-stream
+> follow-on item — `auth_provider` on `AuthEventStreamClient` landed in SDK 2.1.0).
+
+### Added
+
+- **Per-consumer credentials & short-TTL service tokens — consumer side (item 9.1).** New
+  `fastapi_m8._internal_auth` with `build_internal_auth(settings)` selecting one of three
+  modes purely by config:
+  - **legacy** (`INTERNAL_CLIENT_ID` unset) — single `X-Internal-Token`, as before;
+  - **bootstrap** (`INTERNAL_CLIENT_ID` set) — per-consumer `X-Internal-Client` +
+    `X-Internal-Token` on every private call;
+  - **service token** (`+ SERVICE_TOKEN_EXCHANGE_ENABLED`) — exchange the bootstrap
+    credential at `{issuer}/private/v1/service-token` for a short-TTL `Authorization:
+    Bearer` token, refreshed before `exp` and re-exchanged once on a `401`.
+
+  `RemoteRevocationClient` now attaches the provider's headers per request (with a single
+  401 re-exchange retry) instead of baking `X-Internal-Token` in at construction. New
+  public exports: `build_internal_auth`, `InternalAuthProvider`,
+  `ServiceTokenInternalAuth`, `derive_service_token_url`. New settings:
+  `INTERNAL_CLIENT_ID`, `SERVICE_TOKEN_EXCHANGE_ENABLED`, `SERVICE_TOKEN_SCOPES`,
+  `SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS`.
+- **Revocation degradation observability (item 5.5).** New
+  `revocation_check_failures_total{mode}` counter and a loud `security.revocation_fail_open`
+  log line: a `fail_open` opt-out is now surfaced as a conscious availability-over-safety
+  decision, never silent. Consumer-side degradation matrix tested end-to-end
+  (`fail_closed` → 503, `fail_open` → token accepted) through `get_current_user`.
+- **`SECURITY.md` (item 9.2).** New consumer-scoped security doc cross-referencing
+  `auth-sdk-m8`'s canonical "Service identity and mTLS" pattern for multi-host deployments,
+  plus a vulnerability-reporting section.
+
+### Changed
+
+- **`build_event_stream_client` routes through `build_internal_auth` (item 9.1 event-stream
+  follow-on, 2026-06-25).** The SSE stream now authenticates via the same
+  `InternalAuthProvider` the revocation client uses, selected purely by config (legacy /
+  bootstrap / service-token). The factory always passes `auth_provider` to
+  `AuthEventStreamClient`, which owns the provider lifecycle and closes it on `stop()`.
+  Consumer settings are unchanged; the only external requirement change is the SDK floor
+  bump to `>=2.1.0`.
+- **`auth-sdk-m8` floor raised to `>=2.1.0`** (was `>=2.0.1`). `2.1.0` ships the
+  `auth_provider` parameter on `AuthEventStreamClient` and the framework-agnostic
+  `auth_sdk_m8.security.internal_auth` module. The `<3.0.0` ceiling is unchanged.
+- **README (item 10.1).** New *Per-consumer internal auth* subsection and a *Defaults by
+  layer (consumer)* table documenting the consumer column (auto-run config-health,
+  `ALLOWED_HOSTS` inheritance, `METRICS_SCRAPE_CREDENTIAL`, `_FILE` inheritance,
+  `ACCESS_REVOCATION_FAILURE_MODE`). Event-stream section updated to note the shared
+  credential provider.
+- **Event-signing rollout flags surfaced for consumers (item 7.x.1).** `.env.example`
+  documents `EVENT_SIGNING_ENABLED` / `EVENT_SIGNING_ACCEPT_UNSIGNED` and their strict
+  config-health gate (fatal under `STRICT_PRODUCTION_MODE`; `ACCEPT_UNSIGNED` also fatal
+  under `ENVIRONMENT=production`). The gate is auto-run via `create_app`; a consumer-side
+  test asserts it fires. `.env.example` also gains the new 9.1 vars and
+  `REVOCATION_CACHE_TTL_SECONDS`.
+- `COMPAT_MATRIX` `3.1` entry updated to `auth-sdk-m8 >=2.1.0,<3.0.0` (reflects the
+  event-stream `auth_provider` requirement).
+
+---
+
 ## [3.0.0] — 2026-06-23 · auth-sdk-m8 2.0.0 alignment — single-mount `/ping` + SDK major floor
 
 > **MAJOR.** Two independent breaking changes, either of which alone forces this bump:

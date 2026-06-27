@@ -23,3 +23,7 @@ exclude_paths:
   - "*.egg-info/**"
   - ".pytest_cache/**"
   - "**/__pycache__/**"
+  # SECURITY.md is kept markdownlint-clean by hand; excluded here because
+  # Codacy's prose analyzer misclassifies a security policy doc (flags standard
+  # security acronyms such as CA/TTL/JTI as "undefined" on every revision).
+  - "SECURITY.md"
