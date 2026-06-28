@@ -68,6 +68,12 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # consumer-side 5.5 / 7.x.1 test+observability and 9.2/10.1 docs. The post-1.0
     # breaking-removal majors stay deferred (see CHANGELOG). See CHANGELOG.
     "3.1": {"auth-sdk-m8": ">=2.1.0,<3.0.0"},
+    # 3.2 (MINOR) hardens the ungated /health branch to a constant liveness response
+    # (item 9.4 Design B): ungated callers always receive 200 {"status":"ok"};
+    # only credentialed callers (HEALTH_DETAIL_CREDENTIAL) see the real aggregate
+    # status, per-check detail, and the 503 HTTP code on FAIL. No SDK change required;
+    # auth-sdk-m8 floor stays at >=2.1.0. See CHANGELOG.
+    "3.2": {"auth-sdk-m8": ">=2.1.0,<3.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"

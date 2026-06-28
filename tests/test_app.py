@@ -202,18 +202,117 @@ async def test_distinct_credentials_do_not_raise(test_router: APIRouter) -> None
     assert a.state.service_ready is True
 
 
-# ── Health checks ─────────────────────────────────────────────────────────────
+# ── Health Design B — ungated constant liveness (item 9.4) ───────────────────
 
 
 @pytest.mark.anyio
-async def test_failing_check_returns_503(test_router: APIRouter) -> None:
-    """A FAIL check drives the aggregate to 503."""
+async def test_ungated_body_constant_ok_when_degraded(test_router: APIRouter) -> None:
+    """Ungated /health always returns 200 ok even when a check is DEGRADED (9.4)."""
+
+    async def degraded() -> HealthCheckResult:
+        return HealthCheckResult(name="cache", status=HealthStatus.DEGRADED)
+
+    a = create_app(
+        make_settings(**_BASE),
+        test_router,
+        health=HealthConfig(checks=[degraded]),
+    )
+    async with live_client(a) as client:
+        resp = await client.get("/api/health/")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+@pytest.mark.anyio
+async def test_ungated_body_constant_ok_when_fail(test_router: APIRouter) -> None:
+    """Ungated /health always returns 200 ok even when a check is FAIL — no 503 leak (9.4)."""
 
     async def bad() -> HealthCheckResult:
         return HealthCheckResult(name="db", status=HealthStatus.FAIL)
 
     a = create_app(
-        make_settings(**_BASE), test_router, health=HealthConfig(checks=[bad])
+        make_settings(**_BASE),
+        test_router,
+        health=HealthConfig(checks=[bad]),
+    )
+    async with live_client(a) as client:
+        resp = await client.get("/api/health/")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+@pytest.mark.anyio
+async def test_ungated_no_detail_keys_when_fail(test_router: APIRouter) -> None:
+    """Ungated FAIL response: only constant body, no checks/version keys leak (9.4)."""
+
+    async def bad() -> HealthCheckResult:
+        return HealthCheckResult(name="db", status=HealthStatus.FAIL)
+
+    a = create_app(
+        make_settings(**_BASE),
+        test_router,
+        health=HealthConfig(checks=[bad]),
+    )
+    async with live_client(a) as client:
+        resp = await client.get("/api/health/")
+    body = resp.json()
+    assert "checks" not in body
+    assert "fastapi_m8" not in body
+    assert body.get("status") == "ok"
+
+
+@pytest.mark.anyio
+async def test_gated_fail_returns_503_with_real_status(test_router: APIRouter) -> None:
+    """Credentialed /health with a FAIL check returns 503 and status=fail (9.4)."""
+
+    async def bad() -> HealthCheckResult:
+        return HealthCheckResult(name="db", status=HealthStatus.FAIL)
+
+    a = create_app(
+        make_settings(**_BASE, HEALTH_DETAIL_CREDENTIAL="health-cred"),
+        test_router,
+        health=HealthConfig(checks=[bad]),
+    )
+    async with live_client(a, headers={"X-Internal-Token": "health-cred"}) as client:
+        resp = await client.get("/api/health/")
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "fail"
+    assert "checks" in body
+
+
+@pytest.mark.anyio
+async def test_gated_degraded_returns_real_status(test_router: APIRouter) -> None:
+    """Credentialed /health with a DEGRADED check shows the real status (9.4)."""
+
+    async def degraded() -> HealthCheckResult:
+        return HealthCheckResult(name="cache", status=HealthStatus.DEGRADED)
+
+    a = create_app(
+        make_settings(**_BASE, HEALTH_DETAIL_CREDENTIAL="health-cred"),
+        test_router,
+        health=HealthConfig(checks=[degraded], policy=HealthAggregatePolicy.LENIENT),
+    )
+    async with live_client(a, headers={"X-Internal-Token": "health-cred"}) as client:
+        resp = await client.get("/api/health/")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "degraded"
+
+
+# ── Health checks ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_failing_check_gated_returns_503(test_router: APIRouter) -> None:
+    """A FAIL check drives the aggregate to 503 for credentialed (detail_public) callers."""
+
+    async def bad() -> HealthCheckResult:
+        return HealthCheckResult(name="db", status=HealthStatus.FAIL)
+
+    a = create_app(
+        make_settings(**_BASE),
+        test_router,
+        health=HealthConfig(checks=[bad], detail_public=True),
     )
     async with live_client(a) as client:
         resp = await client.get("/api/health/")
@@ -222,8 +321,8 @@ async def test_failing_check_returns_503(test_router: APIRouter) -> None:
 
 
 @pytest.mark.anyio
-async def test_degraded_check_lenient_returns_200(test_router: APIRouter) -> None:
-    """A DEGRADED check stays at 200 under LENIENT policy."""
+async def test_degraded_check_lenient_gated_returns_200(test_router: APIRouter) -> None:
+    """A DEGRADED check stays at 200 under LENIENT policy for credentialed callers."""
 
     async def degraded() -> HealthCheckResult:
         return HealthCheckResult(name="minio", status=HealthStatus.DEGRADED)
@@ -234,6 +333,7 @@ async def test_degraded_check_lenient_returns_200(test_router: APIRouter) -> Non
         health=HealthConfig(
             checks=[degraded],
             policy=HealthAggregatePolicy.LENIENT,
+            detail_public=True,
         ),
     )
     async with live_client(a) as client:
@@ -264,7 +364,7 @@ async def test_health_detail_public_exposes_checks(test_router: APIRouter) -> No
 
 @pytest.mark.anyio
 async def test_health_cache_prevents_double_invocation(test_router: APIRouter) -> None:
-    """Within health_cache_ttl a second probe reuses cached results."""
+    """Within health_cache_ttl a second probe reuses cached results (detail_public path)."""
     call_count = 0
 
     async def counted() -> HealthCheckResult:
@@ -275,7 +375,7 @@ async def test_health_cache_prevents_double_invocation(test_router: APIRouter) -
     a = create_app(
         make_settings(**_BASE),
         test_router,
-        health=HealthConfig(checks=[counted], cache_ttl=10.0),
+        health=HealthConfig(checks=[counted], cache_ttl=10.0, detail_public=True),
     )
     async with live_client(a) as client:
         await client.get("/api/health/")

@@ -5,6 +5,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [3.2.0] — 2026-06-28 · ungated `/health` constant liveness body (item 9.4 Design B)
+
+> **MINOR — additive, backward-compatible.** The only behaviour change is in the ungated
+> `/health` response: callers without a valid `HEALTH_DETAIL_CREDENTIAL` now always
+> receive `200 {"status":"ok"}` instead of the real aggregate status. Callers that
+> already present the credential are unaffected — they still get the real status, per-check
+> detail, and the 503 HTTP code when checks fail. `auth-sdk-m8` floor unchanged at
+> `>=2.1.0,<3.0.0`.
+
+### Changed
+
+- **Ungated `/health` body is now a constant liveness response (item 9.4 Design B).**
+  Callers without a valid `HEALTH_DETAIL_CREDENTIAL` (or `detail_public=True`) always
+  receive `200 {"status":"ok"}`, regardless of the real aggregate health. Previously the
+  ungated branch returned `{"status": overall.value}`, which leaked `degraded` — a
+  public attack-timing oracle that signals when fail-open degradation is active.
+
+  Health checks are **not run** for ungated requests (pure liveness, no dependency
+  probing); caching is unaffected for credentialed callers. Credentialed callers
+  (valid `X-Internal-Token` matching `HEALTH_DETAIL_CREDENTIAL`, or `detail_public=True`)
+  continue to receive the real aggregate status, the per-check body, and the correct
+  HTTP status code (200 or 503).
+
+- **README `Health Detail Gating` section updated** to document the constant ungated
+  body and the Design B rationale; the defaults-by-layer table row for
+  `HEALTH_DETAIL_CREDENTIAL` updated accordingly.
+
+---
+
 ## [3.1.0] — 2026-06-24/25 · consumer-side post-1.0 remediation (9.1 / 5.5 / 7.x.1 / 9.2 / 10.1) + event-stream 9.1 follow-on
 
 > **MINOR — additive, backward-compatible.** Default behaviour is unchanged: a consumer

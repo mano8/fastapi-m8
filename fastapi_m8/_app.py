@@ -368,14 +368,15 @@ def _register_health_route(
             return JSONResponse(
                 {"status": "initializing", "ready": False}, status_code=503
             )
-        results, overall, code = await _gather_health_results(
-            app, checks, config.timeout, config.policy, config.cache_ttl
-        )
-        logger.debug("health: %s (%d checks)", overall.value, len(results))
-        body: dict[str, Any] = {"status": overall.value}
         if config.detail_public or await _is_authorized(request):
+            results, overall, code = await _gather_health_results(
+                app, checks, config.timeout, config.policy, config.cache_ttl
+            )
+            logger.debug("health: %s (%d checks)", overall.value, len(results))
+            body: dict[str, Any] = {"status": overall.value}
             body |= _build_health_body(results, service_name, service_version)
-        return JSONResponse(body, status_code=code)
+            return JSONResponse(body, status_code=code)
+        return JSONResponse({"status": "ok"})
 
 
 def _register_meta_routes(app: FastAPI, settings: ConsumerServiceSettings) -> None:
