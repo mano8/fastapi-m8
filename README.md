@@ -364,18 +364,27 @@ Required only when `TOKEN_MODE=stateful` and `AUTH_SERVICE_ROLE=consumer`.
 #### Per-consumer internal auth (item 9.1)
 
 By default a consumer authenticates private calls with the single shared
-`PRIVATE_API_SECRET` (legacy mode), which matches fa-auth's fallback when it has no
-`PRIVATE_API_CONSUMERS` registry. Set `INTERNAL_CLIENT_ID` to switch to the
-**per-consumer** model: `PRIVATE_API_SECRET` becomes this service's *bootstrap*
-secret, fa-auth authorizes each private route by the credential's granted scope
-(deny-by-default), and the blast radius collapses from the whole fleet to one
-consumer. Optionally exchange the bootstrap credential for short-TTL `Authorization:
-Bearer` service tokens so rotation comes for free from the token TTL. Selection is
-purely by config — the home lab keeps working untouched.
+`PRIVATE_API_SECRET` (legacy mode). **Legacy mode is development-only.** `fa-auth-m8`
+has retired the issuer's legacy single-shared-secret fallback — its
+`PRIVATE_API_CONSUMERS` registry is required in production/strict (item 11.2a) — so a
+production/strict consumer left in legacy mode is guaranteed to fail against a hardened
+issuer. Set `INTERNAL_CLIENT_ID` to switch to the **per-consumer** model:
+`PRIVATE_API_SECRET` becomes this service's *bootstrap* secret, fa-auth authorizes each
+private route by the credential's granted scope (deny-by-default), and the blast radius
+collapses from the whole fleet to one consumer. Optionally exchange the bootstrap
+credential for short-TTL `Authorization: Bearer` service tokens so rotation comes for
+free from the token TTL. Selection is purely by config — the home lab keeps working
+untouched.
+
+> **Fatal under production/strict (item 11.2b).** When `ENVIRONMENT=production` or
+> `STRICT_PRODUCTION_MODE=true`, settings validation fails at construction if
+> `INTROSPECTION_URL` is set but `INTERNAL_CLIENT_ID` is unset. Two coherence rules
+> apply in every environment: `SERVICE_TOKEN_EXCHANGE_ENABLED=true` requires
+> `INTERNAL_CLIENT_ID`, and setting `INTERNAL_CLIENT_ID` requires `PRIVATE_API_SECRET`.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `INTERNAL_CLIENT_ID` | No | — | This consumer's `X-Internal-Client` id. Unset = legacy single-secret mode; set = per-consumer bootstrap mode. |
+| `INTERNAL_CLIENT_ID` | No (Yes in prod/strict when `INTROSPECTION_URL` is set) | — | This consumer's `X-Internal-Client` id. Unset = legacy single-secret mode (development-only; rejected under production/strict once `INTROSPECTION_URL` is set); set = per-consumer bootstrap mode. |
 | `SERVICE_TOKEN_EXCHANGE_ENABLED` | No | `false` | Exchange the bootstrap credential for short-TTL Bearer service tokens at `{issuer}/private/v1/service-token` (requires `INTERNAL_CLIENT_ID`). |
 | `SERVICE_TOKEN_SCOPES` | No | `["introspection"]` | Scopes requested when minting a service token; fa-auth narrows to the subset the bootstrap credential was granted. |
 | `SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS` | No | `30` | Refresh a cached service token this many seconds before its `exp` so a call never races expiry. |
@@ -580,7 +589,7 @@ inherited from `auth-sdk-m8`, and made *fatal* only when pointed at production.
 | `EVENT_SIGNING_ENABLED` / `EVENT_SIGNING_ACCEPT_UNSIGNED` | inherited secure defaults (signing on, unsigned rejected); the gate fires through the consumer's auto-run config-health (item 7.x.1) | `ENABLED=false` under strict; `ACCEPT_UNSIGNED=true` under production or strict |
 | `METRICS_SCRAPE_CREDENTIAL` | unset = `/metrics` relies on network isolation only; set = constant-time `Authorization: Bearer` gate. **Must not equal `PRIVATE_API_SECRET`** (fatal reuse check at startup). | never fatal (network-isolation is a valid posture); reuse of `PRIVATE_API_SECRET` is fatal |
 | `HEALTH_DETAIL_CREDENTIAL` (items 9.3 + 9.4) | unset = `/health` returns a constant `{"status":"ok"}` to all callers (fail-closed liveness; real status never leaked); set = `X-Internal-Token` must match to receive the real aggregate status, per-check breakdown, and correct HTTP code. **Must not equal `PRIVATE_API_SECRET`** (fatal reuse check at startup). | never fatal (no credential = constant liveness response, which is a valid posture); reuse of `PRIVATE_API_SECRET` is fatal |
-| `INTERNAL_CLIENT_ID` (item 9.1) | unset = legacy single `PRIVATE_API_SECRET`; set = per-consumer bootstrap / service-token auth on private calls | never fatal (must be coordinated with the issuer's `PRIVATE_API_CONSUMERS`) |
+| `INTERNAL_CLIENT_ID` (items 9.1 + 11.2b) | unset = legacy single `PRIVATE_API_SECRET` (development-only); set = per-consumer bootstrap / service-token auth on private calls (must be coordinated with the issuer's `PRIVATE_API_CONSUMERS`) | **fatal** under production/strict when `INTROSPECTION_URL` is set but `INTERNAL_CLIENT_ID` is unset; also fatal (any env) when `SERVICE_TOKEN_EXCHANGE_ENABLED=true` without `INTERNAL_CLIENT_ID`, or `INTERNAL_CLIENT_ID` set without `PRIVATE_API_SECRET` |
 | `_FILE` secret mounts | **inherited** from `CommonSettings` — every secret (`PRIVATE_API_SECRET_FILE`, `DB_PASSWORD_FILE`, `METRICS_SCRAPE_CREDENTIAL_FILE`, `HEALTH_DETAIL_CREDENTIAL_FILE`, …) can be sourced from `/run/secrets/*` with no code change | a referenced `<FIELD>_FILE` path is missing (fails closed at construction) |
 
 ---
@@ -1157,6 +1166,9 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `3.3.0` | `>=2.1.1, <3.0.0` | 3.11, 3.12, 3.13, 3.14 |
+| `3.2.0` | `>=2.1.0, <3.0.0` | 3.11, 3.12, 3.13, 3.14 |
+| `3.1.0` | `>=2.1.0, <3.0.0` | 3.11, 3.12, 3.13, 3.14 |
 | `3.0.0` | `>=2.0.1, <3.0.0` | 3.11, 3.12, 3.13, 3.14 |
 | `2.1.0` | `>=1.5.0, <2.0.0` | 3.11, 3.12, 3.13 |
 | `2.0.0` | `>=1.4.0, <2.0.0` | 3.11, 3.12, 3.13 |

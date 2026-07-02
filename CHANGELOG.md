@@ -5,6 +5,67 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [Unreleased]
+
+---
+
+## [3.3.0] — 2026-07-02 · legacy consumer private-auth is development-only (item 11.2b) + supply-chain hardening (11.6/11.7/11.8)
+
+> **MINOR — security remediation, no public API removed.** The only runtime behaviour change
+> is a new fail-closed boot check: a production/strict consumer (`ENVIRONMENT=production` or
+> `STRICT_PRODUCTION_MODE=true`) that still runs legacy single-shared-secret private auth
+> (`INTROSPECTION_URL` set, `INTERNAL_CLIENT_ID` unset) now raises at settings construction.
+> Such a consumer already could not authenticate against a hardened `fa-auth-m8` issuer
+> (item 11.2a retired the shared-secret fallback), so this converts a latent deployment fault
+> into an explicit error rather than changing any working configuration. Local/development is
+> unaffected. `auth-sdk-m8` floor raised to `>=2.1.1,<3.0.0` (carries the SDK's latest
+> dependency/CI maintenance release; no new SDK API is required).
+
+### Security
+
+- **Legacy single-shared-secret private-auth mode is now development-only (OWASP remediation
+  item 11.2b).** `ConsumerServiceSettings` gained a `model_validator` that fails settings
+  construction when a production/strict consumer (`ENVIRONMENT=production` or
+  `STRICT_PRODUCTION_MODE=true`) has `INTROSPECTION_URL` configured but no
+  `INTERNAL_CLIENT_ID`. `fa-auth-m8` has retired the issuer's legacy single-shared-secret
+  private-API fallback (item 11.2a), so a production/strict consumer left in legacy
+  token-only mode is guaranteed to fail against a hardened issuer — this turns that latent
+  deployment fault into an explicit, fail-closed boot error. Legacy mode remains valid for
+  local/development.
+- **Coherent per-consumer private-auth group validation.** The same validator now rejects
+  (in every environment) `SERVICE_TOKEN_EXCHANGE_ENABLED=true` without `INTERNAL_CLIENT_ID`
+  (exchange has no identity to present and would silently downgrade to legacy) and
+  `INTERNAL_CLIENT_ID` set without `PRIVATE_API_SECRET` (per-consumer mode needs its
+  bootstrap secret). No validation message echoes a secret value.
+- **PyPI Trusted Publishing is now the sole publish mechanism (item 11.6).** The long-lived
+  `PYPI_API_TOKEN` secret was removed from `PiPy.yml`; the release job publishes via OIDC
+  (`id-token: write`) into a protected `pypi` environment. No API token is stored in the repo
+  or referenced by any workflow.
+- **CI policy tests (item 11.7).** New `tests/test_ci_policy.py` asserts the supply-chain
+  posture in CI: no `PYPI_API_TOKEN` reference, `id-token: write` present, the protected
+  `pypi` environment is used, the duplicate `ci.yml` is gone, the secret-scan job is present,
+  every action is SHA-pinned in both workflows, and key runtime packages are pinned in
+  `constraints-all.txt`.
+- **Locked dependency constraints (item 11.8).** `constraints.txt` and `constraints-all.txt`
+  are generated via `pip-compile` from public PyPI only (no custom index), giving CI a
+  reproducible, fully-pinned install closure.
+
+### Changed
+
+- CI workflows consolidated — the secret-scan job was absorbed into `CI.yaml` and the
+  duplicate `ci.yml` removed; dependabot SHA bumps for `checkout`, `setup-python`,
+  `sbom-action`, `codecov-action`, and `gitleaks-action` applied across both workflows.
+- `COMPAT_MATRIX` gains a `3.3` entry (`auth-sdk-m8 >=2.1.0,<3.0.0`, unchanged floor).
+
+### Docs
+
+- README *Per-consumer internal auth* section and the defaults-by-layer table now document
+  that legacy mode is development-only and fatal under production/strict; removed wording
+  that implied the issuer still offers a shared-secret fallback. Compatibility table updated
+  with the `3.1.0`–`3.3.0` rows.
+
+---
+
 ## [3.2.0] — 2026-06-28 · ungated `/health` constant liveness body (item 9.4 Design B)
 
 > **MINOR — additive, backward-compatible.** The only behaviour change is in the ungated

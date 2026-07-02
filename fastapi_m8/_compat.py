@@ -74,6 +74,16 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # status, per-check detail, and the 503 HTTP code on FAIL. No SDK change required;
     # auth-sdk-m8 floor stays at >=2.1.0. See CHANGELOG.
     "3.2": {"auth-sdk-m8": ">=2.1.0,<3.0.0"},
+    # 3.3 (MINOR) makes legacy single-shared-secret consumer private-auth
+    # development-only (item 11.2b): ConsumerServiceSettings fails closed at
+    # construction when a production/strict consumer has INTROSPECTION_URL set but
+    # no INTERNAL_CLIENT_ID (fa-auth-m8 retired the issuer's legacy fallback,
+    # item 11.2a), and rejects incoherent per-consumer config groups. Also lands
+    # PyPI Trusted Publishing (OIDC, no long-lived token), CI policy tests, and
+    # pip-compiled locked constraints (items 11.6/11.7/11.8). Floor raised to
+    # auth-sdk-m8 >=2.1.1 to carry the SDK's latest dependency/CI maintenance
+    # release (no new SDK API is required by 3.3). See CHANGELOG.
+    "3.3": {"auth-sdk-m8": ">=2.1.1,<3.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"

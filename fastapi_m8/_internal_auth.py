@@ -6,8 +6,11 @@ JTI-status / revocation introspection endpoint — by one of three modes, select
 purely by configuration so the home lab keeps working unchanged:
 
 * **legacy** — ``INTERNAL_CLIENT_ID`` unset: send the single shared
-  ``PRIVATE_API_SECRET`` as ``X-Internal-Token`` (the pre-9.1 behaviour; matches
-  the issuer's legacy fallback when it has no per-consumer registry).
+  ``PRIVATE_API_SECRET`` as ``X-Internal-Token`` (the pre-9.1 behaviour).
+  **Development-only:** ``fa-auth-m8`` has retired the issuer's legacy
+  single-shared-secret fallback, so this mode is rejected under production/strict
+  once introspection is configured (see
+  ``ConsumerServiceSettings._validate_consumer_private_auth``, item 11.2b).
 * **bootstrap** — ``INTERNAL_CLIENT_ID`` set, exchange disabled: send the
   per-consumer ``X-Internal-Client`` + ``X-Internal-Token`` bootstrap pair on
   every private call. The blast radius is now one consumer, and the issuer gates
