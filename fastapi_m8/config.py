@@ -23,7 +23,7 @@ from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
 from auth_sdk_m8.schemas.meta import ServiceContract, ServiceMeta
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 
 
 class ConsumerServiceSettings(
@@ -81,16 +81,23 @@ class ConsumerServiceSettings(
     # ── Per-consumer internal-auth (9.1, consumer side) ──────────────────────
     # Identity this consumer presents on private calls to fa-auth. Unset
     # (default) keeps the legacy single-secret mode: PRIVATE_API_SECRET is sent
-    # as X-Internal-Token, matching the issuer's legacy fallback when it has no
-    # PRIVATE_API_CONSUMERS registry. Set to this service's registered consumer
-    # id to switch to the per-consumer model — PRIVATE_API_SECRET then carries
-    # *this consumer's* bootstrap secret, and the issuer gates each private route
-    # by the credential's granted scope (deny-by-default).
+    # as X-Internal-Token. This mode is DEVELOPMENT-ONLY and unsafe for a
+    # hardened deployment — fa-auth-m8 has retired the issuer's legacy
+    # single-shared-secret fallback (its PRIVATE_API_CONSUMERS registry is now
+    # required in production/strict, item 11.2a), so a production/strict consumer
+    # left in legacy mode is guaranteed to fail against a hardened issuer. That is
+    # why ``_validate_consumer_private_auth`` (item 11.2b) makes legacy mode fatal
+    # once INTROSPECTION_URL is configured under production/strict. Set this to
+    # the service's registered consumer id to switch to the per-consumer model —
+    # PRIVATE_API_SECRET then carries *this consumer's* bootstrap secret, and the
+    # issuer gates each private route by the credential's granted scope
+    # (deny-by-default).
     INTERNAL_CLIENT_ID: str | None = Field(
         None,
         description=(
             "This consumer's X-Internal-Client id for per-consumer private auth. "
-            "Unset = legacy single shared PRIVATE_API_SECRET mode."
+            "Unset = legacy single shared PRIVATE_API_SECRET mode "
+            "(development-only; rejected under production/strict)."
         ),
     )
     # When INTERNAL_CLIENT_ID is set, opt into exchanging the bootstrap
@@ -184,3 +191,57 @@ class ConsumerServiceSettings(
                 range=self.CONTRACT_RANGE,
             ),
         )
+
+    @model_validator(mode="after")
+    def _validate_consumer_private_auth(self) -> "ConsumerServiceSettings":
+        """
+        Enforce a coherent per-consumer private-auth configuration (item 11.2b).
+
+        Three rules, checked at settings construction so a misconfigured consumer
+        fails closed before it can serve traffic. None of the messages echo a
+        secret value.
+
+        1. **Coherent group — exchange needs an identity.**
+           ``SERVICE_TOKEN_EXCHANGE_ENABLED`` selects a *per-consumer* mode; with
+           no ``INTERNAL_CLIENT_ID`` the exchange has nothing to present and
+           ``build_internal_auth`` would silently fall back to legacy, so it is a
+           configuration error rather than a valid state.
+        2. **Coherent group — per-consumer mode needs its bootstrap secret.**
+           When ``INTERNAL_CLIENT_ID`` is set, ``PRIVATE_API_SECRET`` carries this
+           consumer's bootstrap secret and must be present.
+        3. **Legacy mode is development-only.** ``fa-auth-m8`` has retired the
+           issuer's legacy single-shared-secret private-API fallback (its
+           ``PRIVATE_API_CONSUMERS`` registry is required in production/strict,
+           item 11.2a). A production/strict consumer that still runs legacy
+           token-only mode (``INTROSPECTION_URL`` configured, ``INTERNAL_CLIENT_ID``
+           unset) is therefore guaranteed to fail against a hardened issuer — a
+           deployment fault, not a runtime mode — so it is rejected here. Legacy
+           mode stays valid for local/development only.
+        """
+        if self.SERVICE_TOKEN_EXCHANGE_ENABLED and not self.INTERNAL_CLIENT_ID:
+            raise ValueError(
+                "CONFIG: SERVICE_TOKEN_EXCHANGE_ENABLED=true requires "
+                "INTERNAL_CLIENT_ID — service-token exchange is a per-consumer "
+                "private-auth mode and has no identity to present without it."
+            )
+        if self.INTERNAL_CLIENT_ID and self.PRIVATE_API_SECRET is None:
+            raise ValueError(
+                "CONFIG: INTERNAL_CLIENT_ID is set but PRIVATE_API_SECRET is "
+                "missing — per-consumer private auth needs this consumer's "
+                "bootstrap secret."
+            )
+        is_production = self.ENVIRONMENT == "production" or self.STRICT_PRODUCTION_MODE
+        if (
+            is_production
+            and self.INTROSPECTION_URL is not None
+            and not self.INTERNAL_CLIENT_ID
+        ):
+            raise ValueError(
+                "CONFIG: production/strict consumer has INTROSPECTION_URL set but "
+                "no INTERNAL_CLIENT_ID — the legacy single-shared-secret private "
+                "API mode is development-only and is rejected by a hardened "
+                "fa-auth-m8 issuer (item 11.2b). Set INTERNAL_CLIENT_ID to this "
+                "service's registered consumer id; its PRIVATE_API_SECRET then "
+                "carries the per-consumer bootstrap secret."
+            )
+        return self

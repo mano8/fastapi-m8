@@ -5,6 +5,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [Unreleased]
+
+### Security
+
+- **Legacy single-shared-secret private-auth mode is now development-only (OWASP remediation
+  item 11.2b).** `ConsumerServiceSettings` gained a `model_validator` that fails settings
+  construction when a production/strict consumer (`ENVIRONMENT=production` or
+  `STRICT_PRODUCTION_MODE=true`) has `INTROSPECTION_URL` configured but no
+  `INTERNAL_CLIENT_ID`. `fa-auth-m8` has retired the issuer's legacy single-shared-secret
+  private-API fallback (item 11.2a), so a production/strict consumer left in legacy
+  token-only mode is guaranteed to fail against a hardened issuer — this turns that latent
+  deployment fault into an explicit, fail-closed boot error. Legacy mode remains valid for
+  local/development.
+- **Coherent per-consumer private-auth group validation.** The same validator now rejects
+  (in every environment) `SERVICE_TOKEN_EXCHANGE_ENABLED=true` without `INTERNAL_CLIENT_ID`
+  (exchange has no identity to present and would silently downgrade to legacy) and
+  `INTERNAL_CLIENT_ID` set without `PRIVATE_API_SECRET` (per-consumer mode needs its
+  bootstrap secret). No validation message echoes a secret value.
+
+### Docs
+
+- README *Per-consumer internal auth* section and the defaults-by-layer table now document
+  that legacy mode is development-only and fatal under production/strict; removed wording
+  that implied the issuer still offers a shared-secret fallback.
+
+---
+
 ## [3.2.0] — 2026-06-28 · ungated `/health` constant liveness body (item 9.4 Design B)
 
 > **MINOR — additive, backward-compatible.** The only behaviour change is in the ungated
