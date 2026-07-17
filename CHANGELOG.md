@@ -5,15 +5,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [Unreleased]
+## [4.0.0] — 2026-07-17 · auth-sdk-m8 3.0.0 alignment — canonical role/flag invariant + JTI-status v2 + remote API-key principal
 
-> `auth-sdk-m8` floor raised to `>=3.0.0,<4.0.0` (canonical role/flag authorization
-> invariant, `has_superuser_privileges()`, and the API-key principal/introspection
-> contract). `COMPAT_MATRIX` gains a `4.0` row for the upcoming `fastapi-m8 4.0.0`
-> major, and `__version__` now reads `4.0.0` so `_assert_compat()` gates on that
-> row at boot. The remaining `4.0.0` release bookkeeping (package metadata,
-> compatibility table, locked constraints, release evidence) lands with the
-> coordinated release.
+> **MAJOR — coordinated release with `auth-sdk-m8 3.0.0`.** `fastapi-m8` raises the SDK
+> floor to `>=3.0.0,<4.0.0` to consume the canonical role/flag authorization invariant
+> (`has_superuser_privileges()` and `has_minimum_role()`), the subject-bound JTI-status v2
+> introspection contract, and the API-key principal/introspection schemas. All role guards
+> now delegate to the shared SDK policy helpers, and the new remote API-key principal
+> dependencies (`get_current_api_key_reader`/`_writer` and `require_api_key_role(...)`)
+> resolve a key to its owner's **current** authority through the issuer's introspection
+> endpoint, with no administrative or superuser capability surface. The API-key path is
+> inherently fail-closed, never caches a positive principal, and never retries after
+> transmission — ensuring a role downgrade lands on the key's very next request.
 
 ### Added
 
