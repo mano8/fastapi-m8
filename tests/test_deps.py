@@ -47,6 +47,7 @@ def test_build_auth_deps_stateless_no_revocation_client() -> None:
     auth = build_auth_deps(make_settings())
     assert auth.revocation_client is None
     assert callable(auth.get_current_user)
+    assert callable(auth.get_current_active_writer)
     assert callable(auth.get_current_active_admin)
     assert callable(auth.get_current_active_superuser)
 
@@ -305,12 +306,15 @@ async def test_fail_open_introspection_down_accepts_token() -> None:
     await auth.close()
 
 
-# ── get_current_active_admin ──────────────────────────────────────────────────
+# ── role guards: the §3.3 canonical matrix ────────────────────────────────────
 
 
-def _make_user(role: RoleType, is_superuser: bool = False) -> UserModel:
+def _make_user(role: RoleType, is_superuser: bool | None = None) -> UserModel:
+    """Build a canonical user; is_superuser is derived unless given explicitly."""
     import uuid
 
+    if is_superuser is None:
+        is_superuser = role is RoleType.SUPERADMIN
     return UserModel(
         id=uuid.UUID(_VALID_UUID),
         email="user@example.com",
@@ -320,59 +324,119 @@ def _make_user(role: RoleType, is_superuser: bool = False) -> UserModel:
     )
 
 
-def test_get_current_active_admin_passes_for_admin() -> None:
-    """ADMIN role passes the admin guard."""
+def _make_inconsistent_user(role: RoleType, is_superuser: bool) -> UserModel:
+    """Build a user whose claims violate the canonical invariant.
+
+    auth-sdk-m8 3.0.0 rejects such a pair in ``UserModel`` itself, so the pair
+    must be forced past validation to prove the guards deny it on their own
+    (defense in depth) rather than relying on the model invariant.
+    """
+    import uuid
+
+    return UserModel.model_construct(
+        id=uuid.UUID(_VALID_UUID),
+        email="user@example.com",
+        is_active=True,
+        role=role,
+        is_superuser=is_superuser,
+    )
+
+
+# role → (writer allowed, admin allowed, superuser allowed) — §3.3 truth table.
+_ROLE_MATRIX = [
+    (RoleType.USER, False, False, False),
+    (RoleType.READER, False, False, False),
+    (RoleType.WRITER, True, False, False),
+    (RoleType.ADMIN, True, True, False),
+    (RoleType.SUPERADMIN, True, True, True),
+]
+
+
+def _assert_guard(guard, user: UserModel, allowed: bool) -> None:
+    """Assert *guard* either returns *user* unchanged or denies with a 403."""
+    if allowed:
+        assert guard(user) is user
+        return
+    with pytest.raises(HTTPException) as exc_info:
+        guard(user)
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "The user doesn't have enough privileges"
+
+
+@pytest.mark.parametrize("role,writer_ok,admin_ok,su_ok", _ROLE_MATRIX)
+def test_role_matrix_writer_dependency(
+    role: RoleType, writer_ok: bool, admin_ok: bool, su_ok: bool
+) -> None:
+    """Every canonical role gets the §3.3 writer-dependency outcome."""
     auth = build_auth_deps(make_settings())
-    admin = _make_user(RoleType.ADMIN)
-    result = auth.get_current_active_admin(admin)
-    assert result is admin
+    _assert_guard(auth.get_current_active_writer, _make_user(role), writer_ok)
 
 
-def test_get_current_active_admin_raises_for_regular_user() -> None:
-    """Non-admin role raises 403."""
+@pytest.mark.parametrize("role,writer_ok,admin_ok,su_ok", _ROLE_MATRIX)
+def test_role_matrix_admin_dependency(
+    role: RoleType, writer_ok: bool, admin_ok: bool, su_ok: bool
+) -> None:
+    """Every canonical role gets the §3.3 admin-dependency outcome."""
+    auth = build_auth_deps(make_settings())
+    _assert_guard(auth.get_current_active_admin, _make_user(role), admin_ok)
+
+
+@pytest.mark.parametrize("role,writer_ok,admin_ok,su_ok", _ROLE_MATRIX)
+def test_role_matrix_superuser_dependency(
+    role: RoleType, writer_ok: bool, admin_ok: bool, su_ok: bool
+) -> None:
+    """Every canonical role gets the §3.3 superuser-dependency outcome."""
+    auth = build_auth_deps(make_settings())
+    _assert_guard(auth.get_current_active_superuser, _make_user(role), su_ok)
+
+
+# ── no privilege escalation through the is_superuser flag ─────────────────────
+
+
+@pytest.mark.parametrize("role", [RoleType.USER, RoleType.READER])
+def test_superuser_flag_never_bypasses_writer_guard(role: RoleType) -> None:
+    """is_superuser=True on a sub-writer role still fails the writer guard."""
     auth = build_auth_deps(make_settings())
     with pytest.raises(HTTPException) as exc_info:
-        auth.get_current_active_admin(_make_user(RoleType.USER))
+        auth.get_current_active_writer(_make_inconsistent_user(role, True))
     assert exc_info.value.status_code == 403
 
 
-# ── get_current_active_superuser ──────────────────────────────────────────────
-
-
-def test_get_current_active_superuser_passes_for_superuser() -> None:
-    """SUPERADMIN passes the superuser guard."""
-    auth = build_auth_deps(make_settings())
-    su = _make_user(RoleType.SUPERADMIN, is_superuser=True)
-    result = auth.get_current_active_superuser(su)
-    assert result is su
-
-
-def test_get_current_active_superuser_raises_for_admin() -> None:
-    """ADMIN (is_superuser=False) raises 403."""
+@pytest.mark.parametrize("role", [RoleType.USER, RoleType.READER, RoleType.WRITER])
+def test_superuser_flag_never_bypasses_admin_guard(role: RoleType) -> None:
+    """is_superuser=True on a sub-admin role still fails the admin guard."""
     auth = build_auth_deps(make_settings())
     with pytest.raises(HTTPException) as exc_info:
-        auth.get_current_active_superuser(_make_user(RoleType.ADMIN))
+        auth.get_current_active_admin(_make_inconsistent_user(role, True))
     assert exc_info.value.status_code == 403
 
 
-def test_get_current_active_superuser_raises_for_non_superuser_flag() -> None:
-    """SUPERADMIN role but is_superuser=False raises 403."""
+@pytest.mark.parametrize(
+    "role", [RoleType.USER, RoleType.READER, RoleType.WRITER, RoleType.ADMIN]
+)
+def test_superuser_flag_never_bypasses_superuser_guard(role: RoleType) -> None:
+    """is_superuser=True without the SUPERADMIN role is never superuser."""
+    auth = build_auth_deps(make_settings())
+    with pytest.raises(HTTPException) as exc_info:
+        auth.get_current_active_superuser(_make_inconsistent_user(role, True))
+    assert exc_info.value.status_code == 403
+
+
+def test_superuser_role_without_flag_denied() -> None:
+    """SUPERADMIN role with is_superuser=False lacks the dual evidence → 403."""
     auth = build_auth_deps(make_settings())
     with pytest.raises(HTTPException) as exc_info:
         auth.get_current_active_superuser(
-            _make_user(RoleType.SUPERADMIN, is_superuser=False)
+            _make_inconsistent_user(RoleType.SUPERADMIN, False)
         )
     assert exc_info.value.status_code == 403
 
 
-def test_get_current_active_superuser_raises_for_superuser_flag_with_insufficient_role() -> (
-    None
-):
-    """is_superuser=True but ADMIN role fails the SUPERADMIN role check."""
+def test_superuser_role_without_flag_still_passes_admin_guard() -> None:
+    """The admin guard is a pure role check: the flag neither grants nor blocks."""
     auth = build_auth_deps(make_settings())
-    with pytest.raises(HTTPException) as exc_info:
-        auth.get_current_active_superuser(_make_user(RoleType.ADMIN, is_superuser=True))
-    assert exc_info.value.status_code == 403
+    user = _make_inconsistent_user(RoleType.SUPERADMIN, False)
+    assert auth.get_current_active_admin(user) is user
 
 
 # ── AuthDeps cache eviction helpers ──────────────────────────────────────────

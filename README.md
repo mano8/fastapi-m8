@@ -51,7 +51,7 @@ health checks; the framework wires the rest.
 | Capability | How |
 |---|---|
 | JWT validation | `build_auth_deps()` + `auth-sdk-m8` validator |
-| Role-based access control | `AuthDeps.get_current_active_admin / _superuser` |
+| Role-based access control | `AuthDeps.get_current_active_writer / _admin / _superuser` |
 | Token revocation (stateful mode) | `RemoteRevocationClient` → `fa-auth-m8` private API (optional short-TTL cache via `REVOCATION_CACHE_TTL_SECONDS`) |
 | Auth event stream (optional) | `build_event_stream_client()` → fa-auth SSE bridge for best-effort cache eviction |
 | CORS | Auto-wired from `settings.ALLOWED_ORIGINS` |
@@ -700,8 +700,9 @@ Returns a frozen dataclass with everything needed for route protection.
 |---|---|---|
 | `auth.CurrentUser` | `Annotated[UserModel, Depends(...)]` | Inject authenticated user into routes |
 | `auth.get_current_user` | `async Callable` | FastAPI dependency; validates JWT, checks revocation |
+| `auth.get_current_active_writer` | `Callable` | Raises 403 unless user has WRITER, ADMIN or SUPERADMIN role |
 | `auth.get_current_active_admin` | `Callable` | Raises 403 unless user has ADMIN or SUPERADMIN role |
-| `auth.get_current_active_superuser` | `Callable` | Raises 403 unless user has SUPERADMIN role and `is_superuser=True` |
+| `auth.get_current_active_superuser` | `Callable` | Raises 403 unless user has SUPERADMIN role **and** `is_superuser=True` (both are required; neither claim grants privilege on its own) |
 | `auth.revocation_client` | `RemoteRevocationClient \| None` | Present only in stateful mode |
 
 **`UserModel` fields available in routes:**
@@ -864,6 +865,13 @@ router = APIRouter()
 @router.get("/profile")
 async def get_profile(user: auth.CurrentUser):
     return {"id": user.id, "email": user.email, "role": user.role}
+
+# WRITER, ADMIN or SUPERADMIN
+@router.post("/items")
+async def create_item(
+    writer: Annotated[UserModel, Depends(auth.get_current_active_writer)],
+):
+    ...
 
 # ADMIN or SUPERADMIN
 @router.delete("/users/{user_id}")

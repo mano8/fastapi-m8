@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any
 
+from auth_sdk_m8 import has_minimum_role, has_superuser_privileges
 from auth_sdk_m8.core.exceptions import InvalidToken
 from auth_sdk_m8.schemas.base import RoleType
 from auth_sdk_m8.schemas.user import UserModel
@@ -71,10 +72,10 @@ def _build_active_user(payload: Any) -> UserModel:
 
 
 def _require_role(current_user: UserModel, role_limit: RoleType) -> None:
-    if not RoleType.is_valid_role_auth(
-        current_role=current_user.role,
-        role_limit=role_limit,
-    ):
+    # Role hierarchy lives only in the SDK (has_minimum_role). is_superuser is
+    # deliberately not consulted: the flag alone never satisfies a role
+    # threshold, so it can never bypass the writer/admin guards.
+    if not has_minimum_role(current_user.role, role_limit):
         raise HTTPException(status_code=_FORBIDDEN, detail=_NO_PRIVILEGES)
 
 
@@ -99,17 +100,34 @@ class AuthDeps:
         Dependency function — returns the authenticated user.
     CurrentUser
         ``Annotated[UserModel, Depends(get_current_user)]``.
+    get_current_active_writer
+        Dependency that additionally requires at least WRITER role.
     get_current_active_admin
-        Dependency that additionally checks ADMIN role.
+        Dependency that additionally requires at least ADMIN role.
     get_current_active_superuser
-        Checks SUPERADMIN role.
+        Requires canonical superuser claims (SUPERADMIN *and* is_superuser).
     revocation_client
         The revocation client, or None for stateless mode.
+
+    Every JWT guard is authorized through the auth-sdk-m8 policy helpers, so
+    the role hierarchy and the canonical-superuser predicate are never
+    reimplemented here:
+
+    ==================  =====  ======  ======  ==========
+    Role                auth   writer  admin   superuser
+    ==================  =====  ======  ======  ==========
+    USER                allow  403     403     403
+    READER              allow  403     403     403
+    WRITER              allow  allow   403     403
+    ADMIN               allow  allow   allow   403
+    SUPERADMIN          allow  allow   allow   allow
+    ==================  =====  ======  ======  ==========
 
     """
 
     get_current_user: Callable
     CurrentUser: Any
+    get_current_active_writer: Callable
     get_current_active_admin: Callable
     get_current_active_superuser: Callable
     revocation_client: RemoteRevocationClient | None
@@ -206,6 +224,13 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
 
     CurrentUser = Annotated[UserModel, Depends(get_current_user)]
 
+    def get_current_active_writer(
+        current_user: UserModel = Depends(get_current_user),
+    ) -> UserModel:
+        """Verify at least WRITER role."""
+        _require_role(current_user, RoleType.WRITER)
+        return current_user
+
     def get_current_active_admin(
         current_user: UserModel = Depends(get_current_user),
     ) -> UserModel:
@@ -216,15 +241,18 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
     def get_current_active_superuser(
         current_user: UserModel = Depends(get_current_user),
     ) -> UserModel:
-        """Verify SUPERADMIN role."""
-        if not current_user.is_superuser:
+        """Verify canonical superuser claims (SUPERADMIN *and* is_superuser)."""
+        # Dual-evidence predicate: neither claim grants privilege alone, so a
+        # stray is_superuser=true on a lower role is denied here as well as by
+        # the SDK model invariant (defense in depth).
+        if not has_superuser_privileges(current_user.role, current_user.is_superuser):
             raise HTTPException(status_code=_FORBIDDEN, detail=_NO_PRIVILEGES)
-        _require_role(current_user, RoleType.SUPERADMIN)
         return current_user
 
     return AuthDeps(
         get_current_user=get_current_user,
         CurrentUser=CurrentUser,
+        get_current_active_writer=get_current_active_writer,
         get_current_active_admin=get_current_active_admin,
         get_current_active_superuser=get_current_active_superuser,
         revocation_client=revocation_client,

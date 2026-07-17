@@ -10,8 +10,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 > `auth-sdk-m8` floor raised to `>=3.0.0,<4.0.0` (canonical role/flag authorization
 > invariant, `has_superuser_privileges()`, and the API-key principal/introspection
 > contract). `COMPAT_MATRIX` gains a `4.0` row for the upcoming `fastapi-m8 4.0.0`
-> major; the currently-released `3.x` line still gates on the prior `<3.0.0` floor
-> until the coordinated `4.0.0` release lands.
+> major, and `__version__` now reads `4.0.0` so `_assert_compat()` gates on that
+> row at boot. The remaining `4.0.0` release bookkeeping (package metadata,
+> compatibility table, locked constraints, release evidence) lands with the
+> coordinated release.
+
+### Added
+
+- **`AuthDeps.get_current_active_writer`** — the JWT writer dependency, built by the
+  single `build_auth_deps()` call alongside the existing authenticated/admin/superuser
+  members. Requires a minimum role of `WRITER`, so `WRITER`/`ADMIN`/`SUPERADMIN` pass
+  and `USER`/`READER` receive the unchanged `403 "The user doesn't have enough
+  privileges"` response.
+
+### Changed
+
+- **All JWT role guards now authorize through the `auth-sdk-m8` policy helpers.**
+  `get_current_active_writer`/`_admin` delegate the hierarchy to
+  `has_minimum_role()` (replacing the local `RoleType.is_valid_role_auth()` call), so
+  the role ordering exists only in the SDK and the two guards cannot drift.
+
+### Security
+
+- **`get_current_active_superuser` now requires canonical dual evidence.** It delegates
+  to the SDK's `has_superuser_privileges()`, which demands `role == SUPERADMIN` **and**
+  `is_superuser=True` together. Previously the guard checked the `is_superuser` flag and
+  the role in two separate steps; the flag is no longer sufficient evidence on its own at
+  any step. A token whose claims disagree (e.g. `is_superuser=true` with a lower role) is
+  already rejected at validation by the SDK 3.0.0 model invariant — this guard-level check
+  is defense in depth for a principal that reaches the dependency inconsistent.
+- **No role guard consults `is_superuser` for a role threshold.** The writer and admin
+  dependencies are pure role checks, so a stray `is_superuser=true` can never bypass them.
 
 ---
 
