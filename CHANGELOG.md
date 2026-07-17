@@ -7,6 +7,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ## [Unreleased]
 
+> `auth-sdk-m8` floor raised to `>=3.0.0,<4.0.0` (canonical role/flag authorization
+> invariant, `has_superuser_privileges()`, and the API-key principal/introspection
+> contract). `COMPAT_MATRIX` gains a `4.0` row for the upcoming `fastapi-m8 4.0.0`
+> major; the currently-released `3.x` line still gates on the prior `<3.0.0` floor
+> until the coordinated `4.0.0` release lands.
+
 ---
 
 ## [3.3.0] — 2026-07-02 · legacy consumer private-auth is development-only (item 11.2b) + supply-chain hardening (11.6/11.7/11.8)
