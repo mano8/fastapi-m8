@@ -1,0 +1,15 @@
+title = "fastapi-m8 gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project-wide allowlist"
+paths = [
+  # Test fixtures may contain deterministic low-entropy test values
+  '''tests/''',
+]
+# Add SHAs of any prior accidental secret commits here after rotation:
+# commits = [
+#   "abc123def456",  # description of what was rotated and when
+# ]
