@@ -87,6 +87,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ### Security
 
+- **`get_current_active_writer`/`_admin`/`_superuser` never answer from the positive
+  revocation cache (`REV-CACHE-01`, 3.5.4).** They now resolve the token through a
+  dedicated fresh-only path (`RemoteRevocationClient.is_revoked(..., bypass_cache=True)`)
+  instead of the shared `get_current_user` dependency, so the first role-sensitive
+  request after a revocation commits always observes the new state. The short-TTL
+  positive cache (`REVOCATION_CACHE_TTL_SECONDS`) now serves only the general
+  authenticated tier (`CurrentUser`/`get_current_user`); a bypassed lookup still
+  refreshes the shared cache entry so the general tier benefits from it too.
 - **`get_current_active_superuser` now requires canonical dual evidence.** It delegates
   to the SDK's `has_superuser_privileges()`, which demands `role == SUPERADMIN` **and**
   `is_superuser=True` together. Previously the guard checked the `is_superuser` flag and

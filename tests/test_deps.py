@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from auth_sdk_m8.events import AuthStreamEvent
 from auth_sdk_m8.schemas.base import RoleType
 from auth_sdk_m8.schemas.user import UserModel
 from auth_sdk_m8.security.jwks_resolver import JwksKeyResolver
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from fastapi_m8._deps import _LoggingHooks, build_auth_deps
 from fastapi_m8._revocation import RevocationCheckError
@@ -501,6 +503,112 @@ def _stateful_auth(**overrides):  # type: ignore[return]
         **overrides,
     )
     return build_auth_deps(s)
+
+
+# ── REV-CACHE-01: role-sensitive dependencies bypass the positive cache ──────
+
+
+def _active_jti_status(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "active": True,
+            "user_id": _VALID_UUID,
+            "auth_generation": 1,
+            "schema_version": "2",
+        },
+    )
+
+
+def _route_client(auth, dependency) -> TestClient:
+    app = FastAPI()
+
+    @app.get("/thing")
+    def route(user=Depends(dependency)) -> dict:  # noqa: ANN001
+        return {"role": user.role.value}
+
+    return TestClient(app)
+
+
+def test_writer_dependency_never_answers_from_the_cache() -> None:
+    """Two writer-guarded requests for the same JTI both hit the issuer.
+
+    ``REV-CACHE-01`` (3.5.4): the short-TTL positive cache serves only the
+    general authenticated tier. A role-sensitive dependency must observe the
+    new authorization state on its very first request after a revocation
+    commits, so it may never be satisfied from a cached prior answer — even
+    one it just populated itself.
+    """
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    client = _route_client(auth, auth.get_current_active_writer)
+    token = make_access_token(role="writer")
+
+    for _ in range(2):
+        response = client.get("/thing", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+    assert len(calls) == 2, "a role-sensitive request must never be a cache hit"
+
+
+def test_general_authenticated_tier_reuses_the_cache() -> None:
+    """The plain authenticated dependency may still answer from the cache."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    client = _route_client(auth, auth.get_current_user)
+    token = make_access_token(role="writer")
+
+    for _ in range(2):
+        response = client.get("/thing", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+    assert len(calls) == 1, "the general tier should reuse the positive cache entry"
+
+
+def test_writer_dependency_still_populates_the_cache_for_the_general_tier() -> None:
+    """A bypassed (role-sensitive) lookup still refreshes the shared cache entry."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    token = make_access_token(role="writer")
+
+    writer_client = _route_client(auth, auth.get_current_active_writer)
+    assert (
+        writer_client.get(
+            "/thing", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
+    assert len(calls) == 1
+
+    general_client = _route_client(auth, auth.get_current_user)
+    assert (
+        general_client.get(
+            "/thing", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
+    assert len(calls) == 1, (
+        "the general tier should reuse the entry the writer path put"
+    )
 
 
 def test_evict_jti_noop_without_revocation_client() -> None:

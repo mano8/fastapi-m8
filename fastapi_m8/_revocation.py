@@ -340,15 +340,19 @@ class RemoteRevocationClient:
             ),
         )
 
-    async def is_revoked(self, jti: str, user_id: str) -> bool:
+    async def is_revoked(
+        self, jti: str, user_id: str, *, bypass_cache: bool = False
+    ) -> bool:
         """
         Return True when the JTI has been revoked.
 
-        Checks the local cache first (when enabled).  A cache hit on an
-        ``active=True`` result returns False immediately.  On a cache miss the
-        v2 endpoint is called with *user_id* as the asserted subject; an active
-        reply is cached for the configured TTL, tagged with the generation the
-        issuer returned.
+        Checks the local cache first (when enabled and *bypass_cache* is
+        False).  A cache hit on an ``active=True`` result returns False
+        immediately.  On a cache miss — or when bypassed — the v2 endpoint is
+        called with *user_id* as the asserted subject; an active reply is
+        cached for the configured TTL, tagged with the generation the issuer
+        returned, so a bypassed call still refreshes the entry for the general
+        tier's benefit.
 
         An active reply whose generation the cache already knows to be
         superseded is a stale read of a session revoked at a later generation,
@@ -359,6 +363,12 @@ class RemoteRevocationClient:
             user_id: The subject the caller read from the token it holds. The
                 v2 request is subject-bound, and an active reply for any other
                 subject is refused (never accepted, never cached).
+            bypass_cache: Skip the positive-cache lookup and always query the
+                issuer. Role-sensitive JWT dependencies (writer/admin/
+                superuser) pass this so the first such request after a
+                revocation commit always observes the new state — the
+                short-TTL positive cache applies only to the general
+                authenticated tier (``REV-CACHE-01``, 3.5.4).
 
         Raises:
             RevocationDecisionError: The issuer answered unusably. Always
@@ -367,7 +377,7 @@ class RemoteRevocationClient:
                 ``fail_closed`` is set; otherwise such a call returns False.
 
         """
-        if self._cache is not None:
+        if self._cache is not None and not bypass_cache:
             cached = self._cache.get(jti)
             if cached is not None:
                 self._record_lookup("hit")

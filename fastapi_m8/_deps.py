@@ -69,12 +69,18 @@ def _validate_access_token(validator: Any, token: str) -> Any:
 
 
 async def _check_token_revocation(
-    revocation_client: RemoteRevocationClient | None, jti: str, user_id: str
+    revocation_client: RemoteRevocationClient | None,
+    jti: str,
+    user_id: str,
+    *,
+    bypass_cache: bool = False,
 ) -> None:
     if revocation_client is None:
         return
     try:
-        if await revocation_client.is_revoked(jti, user_id=user_id):
+        if await revocation_client.is_revoked(
+            jti, user_id=user_id, bypass_cache=bypass_cache
+        ):
             raise HTTPException(
                 status_code=_FORBIDDEN,
                 detail="Token has been revoked.",
@@ -336,30 +342,49 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
     )
     TokenDep = Annotated[str, Depends(reusable_oauth2)]
 
+    async def _authenticate(token: str, *, bypass_cache: bool) -> UserModel:
+        payload = _validate_access_token(validator, token)
+        await _check_token_revocation(
+            revocation_client, payload.jti, payload.sub, bypass_cache=bypass_cache
+        )
+        return _build_active_user(payload)
+
     async def get_current_user(token: TokenDep) -> UserModel:
         """Extract and validate the current user from the JWT access token."""
-        payload = _validate_access_token(validator, token)
-        await _check_token_revocation(revocation_client, payload.jti, payload.sub)
-        return _build_active_user(payload)
+        return await _authenticate(token, bypass_cache=False)
 
     CurrentUser = Annotated[UserModel, Depends(get_current_user)]
 
+    async def _get_current_user_fresh(token: TokenDep) -> UserModel:
+        """
+        Role-sensitive variant of ``get_current_user``.
+
+        Never answered from the positive revocation cache: the first
+        writer/admin/superuser request after a revocation commit must observe
+        the new state, while the general authenticated tier may still reuse a
+        result within the configured TTL (``REV-CACHE-01``, 3.5.4). A separate
+        dependency — rather than a flag on ``get_current_user`` — is what makes
+        this the *only* path a role guard can reach: there is no shared call
+        site left to bypass by mistake.
+        """
+        return await _authenticate(token, bypass_cache=True)
+
     def get_current_active_writer(
-        current_user: UserModel = Depends(get_current_user),
+        current_user: UserModel = Depends(_get_current_user_fresh),
     ) -> UserModel:
         """Verify at least WRITER role."""
         _require_role(current_user, RoleType.WRITER)
         return current_user
 
     def get_current_active_admin(
-        current_user: UserModel = Depends(get_current_user),
+        current_user: UserModel = Depends(_get_current_user_fresh),
     ) -> UserModel:
         """Verify at least ADMIN role."""
         _require_role(current_user, RoleType.ADMIN)
         return current_user
 
     def get_current_active_superuser(
-        current_user: UserModel = Depends(get_current_user),
+        current_user: UserModel = Depends(_get_current_user_fresh),
     ) -> UserModel:
         """Verify canonical superuser claims (SUPERADMIN *and* is_superuser)."""
         # Dual-evidence predicate: neither claim grants privilege alone, so a
