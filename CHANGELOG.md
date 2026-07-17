@@ -17,6 +17,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ### Added
 
+- **JTI-status v2 (subject-bound, generation-tagged)** — `RemoteRevocationClient`
+  now speaks the v2 introspection contract: the request asserts the subject read
+  from the token (`{jti, expected_user_id, schema_version}`), and an active reply
+  carries the owner's `auth_generation`, which tags the cache entry it produces.
+  As defense in depth an active reply naming a different subject is refused and
+  never cached. **The v2 decision never falls open:** a reply this release cannot
+  interpret — malformed, unknown `schema_version`, or a pre-2.0 issuer's bare
+  `{"active": true}` with no generation — raises the new `RevocationDecisionError`
+  (a `RevocationCheckError`, so dependencies still answer `503`) regardless of
+  `ACCESS_REVOCATION_FAILURE_MODE`, which remains a transport-outage escape only.
+- **`AuthDeps.handle_auth_event(event)`** — the supported `on_event` handler for
+  `build_event_stream_client`, so no service re-derives the eviction rules
+  locally. Accepts **both v1 and v2** `session-revoked` events for the rollout
+  interval in which the issuer emits v2 before every consumer has upgraded, and
+  routes `user-deleted` as before. v2 events apply the exact `<`/`==`/`>`
+  watermark rule per user, deduplicated on the durable `event_id` (never the SSE
+  transport id, which resets on issuer restart), so a replay is idempotent while
+  sibling JTI events at one generation stay distinguishable. A user-wide event
+  evicts the user's entries older than the revoking generation and spares
+  sessions minted after it. A v1 event carries no generation to compare, so it
+  evicts the whole user; an unusable payload flushes the cache.
 - **Remote API-key principal dependencies** — `AuthDeps` gains
   `get_current_api_key_principal`, the `require_api_key_role(...)` factory, and its
   `get_current_api_key_reader`/`_writer` specializations, built by the same single

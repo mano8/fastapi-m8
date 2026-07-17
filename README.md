@@ -361,7 +361,7 @@ Required only when `TOKEN_MODE=stateful` and `AUTH_SERVICE_ROLE=consumer`.
 | `INTROSPECTION_URL` | Yes | — | `POST` endpoint on auth service for JTI revocation checks, e.g. `http://auth_user_service:8000/user/private/v1/jti-status` |
 | `PRIVATE_API_SECRET` | Yes | — | The credential for private calls. In **legacy** mode it is the single shared secret sent as `X-Internal-Token` (must match auth service); in **per-consumer** mode (see below) it carries *this* consumer's bootstrap secret. |
 | `ACCESS_REVOCATION_FAILURE_MODE` | No | `fail_closed` | `fail_closed` (default, secure — reject tokens when the check is unverifiable, returning **503**) or `fail_open` (accept on network/HTTP error — the opt-out is logged loudly and counted as `revocation_check_failures_total{mode="fail_open"}`). |
-| `REVOCATION_CACHE_TTL_SECONDS` | No | `0` | Short-TTL positive validation cache. `0` (default) disables it — every request calls fa-auth. Set to e.g. `30` to trust an `active=True` result for 30 s, skipping the HTTP round-trip; stream events (`session-revoked`/`user-deleted`) evict affected entries and an unresumable gap flushes all (requires the event-stream client). |
+| `REVOCATION_CACHE_TTL_SECONDS` | No | `0` | Short-TTL positive validation cache. `0` (default) disables it — every request calls fa-auth. Set to e.g. `30` to trust an `active=True` result for 30 s, skipping the HTTP round-trip. Entries are tagged with the `auth_generation` fa-auth returned; stream events (`session-revoked`/`user-deleted`) evict affected entries and an unresumable gap flushes all (requires the event-stream client). This TTL is the staleness ceiling — the stream is an accelerator, not the guarantee. |
 
 #### Per-consumer internal auth (item 9.1)
 
@@ -459,28 +459,28 @@ therefore **a single config knob** shared with JTI introspection: legacy
 token, selected by `INTERNAL_CLIENT_ID` / `SERVICE_TOKEN_EXCHANGE_ENABLED` (see
 *Per-consumer internal auth* above).
 
+Pass `auth.handle_auth_event` as `on_event`: it applies each event to the validation
+cache under the rules below, so your service never re-derives them.
+
 ```python
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi_m8 import build_event_stream_client, AuthStreamEvent
+from fastapi_m8 import build_event_stream_client
 
-
-async def on_auth_event(event: AuthStreamEvent) -> None:
-    # session-revoked / user-deleted → evict the affected entry from local caches.
-    ...
+from app.core.deps import auth  # your single build_auth_deps(...) result
 
 
 async def on_gap() -> None:
     # Unresumable stream (fa-auth restarted / buffer evicted) → flush ALL caches.
-    ...
+    auth.flush_cache()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     client = build_event_stream_client(
         settings,
-        on_event=on_auth_event,
+        on_event=auth.handle_auth_event,
         on_gap=on_gap,
     )
     client.start()
@@ -489,6 +489,24 @@ async def lifespan(app: FastAPI):
     finally:
         await client.stop()
 ```
+
+`handle_auth_event` accepts **both v1 and v2** `session-revoked` events, so it keeps
+working across the interval where the issuer already emits v2 and consumers have not
+all upgraded. A v2 event carries the owner's `auth_generation` and a durable
+`event_id`, which together make replay and reorder safe:
+
+| Event generation vs. the user's watermark | Outcome |
+|---|---|
+| Lower | Already superseded — ignored. |
+| Equal | Applied, unless that exact `event_id` was already applied at this generation. |
+| Higher | Applied; the watermark advances. |
+
+A user-wide v2 event (no `jti`) evicts only the entries older than the revoking
+generation, so a session minted by a login that has already re-authenticated
+survives. A v1 event carries no generation to compare against and therefore evicts
+the whole user; an unusable payload flushes the cache. The durable `event_id` — not
+the SSE transport id, which resets when fa-auth restarts — is the dedup key, so
+several JTI events sharing one generation stay distinguishable.
 
 The client verifies every payload's HMAC signature with `EVENT_SIGNING_KEY` (must match
 fa-auth), auto-reconnects with jittered backoff, resumes via `Last-Event-ID`, and **never
@@ -753,6 +771,7 @@ Returns a frozen dataclass with everything needed for route protection.
 | `auth.get_current_active_admin` | `Callable` | Raises 403 unless user has ADMIN or SUPERADMIN role |
 | `auth.get_current_active_superuser` | `Callable` | Raises 403 unless user has SUPERADMIN role **and** `is_superuser=True` (both are required; neither claim grants privilege on its own) |
 | `auth.revocation_client` | `RemoteRevocationClient \| None` | Present only in stateful mode |
+| `auth.handle_auth_event` | `Callable` | Pass as `on_event` to `build_event_stream_client`; applies v1/v2 `session-revoked` and `user-deleted` events to the validation cache |
 | `auth.get_current_api_key_principal` | `async Callable \| None` | Resolves an `X-API-Key` to its owner's **current** authority via the issuer. Proves a live owner only — never writer capability |
 | `auth.require_api_key_role` | `Callable \| None` | Factory: `require_api_key_role(RoleType.WRITER)` builds a capability dependency. Rejects any role above `WRITER` |
 | `auth.get_current_api_key_reader` | `async Callable \| None` | Raises 403 unless the key's owner is at least READER |

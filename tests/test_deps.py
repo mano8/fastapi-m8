@@ -6,6 +6,7 @@ import logging
 from unittest.mock import AsyncMock
 
 import pytest
+from auth_sdk_m8.events import AuthStreamEvent
 from auth_sdk_m8.schemas.base import RoleType
 from auth_sdk_m8.schemas.user import UserModel
 from auth_sdk_m8.security.jwks_resolver import JwksKeyResolver
@@ -475,7 +476,7 @@ def test_evict_jti_delegates_when_cache_enabled() -> None:
     auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
     assert auth.revocation_client is not None
     assert auth.revocation_client._cache is not None
-    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.revocation_client._cache.put("jti-1", "user-a", 1)
     auth.evict_jti("jti-1")
     assert auth.revocation_client._cache.get("jti-1") is None
 
@@ -485,7 +486,7 @@ def test_evict_user_delegates_when_cache_enabled() -> None:
     auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
     assert auth.revocation_client is not None
     assert auth.revocation_client._cache is not None
-    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.revocation_client._cache.put("jti-1", "user-a", 1)
     auth.evict_user("user-a")
     assert auth.revocation_client._cache.get("jti-1") is None
 
@@ -495,9 +496,92 @@ def test_flush_cache_delegates_when_cache_enabled() -> None:
     auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
     assert auth.revocation_client is not None
     assert auth.revocation_client._cache is not None
-    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.revocation_client._cache.put("jti-1", "user-a", 1)
     auth.flush_cache()
     assert auth.revocation_client._cache.get("jti-1") is None
+
+
+def _event(event_type: str, payload: dict) -> AuthStreamEvent:
+    return AuthStreamEvent(event_type=event_type, payload=payload, event_id="7-1")
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_applies_session_revoked() -> None:
+    """The SSE handler routes session-revoked into the watermark rule."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 1)
+    await auth.handle_auth_event(
+        _event(
+            "session-revoked",
+            {
+                "event_type": "session.revoked",
+                "user_id": "user-a",
+                "jti": "jti-1",
+                "auth_generation": 2,
+                "event_id": "evt-1",
+            },
+        )
+    )
+    assert cache.get("jti-1") is None
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_applies_user_deleted() -> None:
+    """user-deleted evicts every entry the deleted account still holds."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 9)
+    await auth.handle_auth_event(
+        _event("user-deleted", {"event_type": "user.deleted", "user_id": "user-a"})
+    )
+    assert cache.get("jti-1") is None
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_accepts_the_dotted_spelling() -> None:
+    """The payload's canonical dot spelling routes identically to the SSE one."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 9)
+    await auth.handle_auth_event(
+        _event("user.deleted", {"event_type": "user.deleted", "user_id": "user-a"})
+    )
+    assert cache.get("jti-1") is None
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_ignores_unknown_type() -> None:
+    """An event type this release does not act on is dropped, never raised on."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    await auth.handle_auth_event(_event("something-else", {"user_id": "user-a"}))
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_ignores_user_deleted_without_a_user() -> None:
+    """A user-deleted payload with no usable user id evicts nothing."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 1)
+    await auth.handle_auth_event(_event("user-deleted", {"event_type": "user.deleted"}))
+    assert cache.get("jti-1") is False
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_noop_in_stateless_mode() -> None:
+    """With no revocation client there is no cache to evict from."""
+    auth = build_auth_deps(make_settings())
+    await auth.handle_auth_event(
+        _event("session-revoked", {"event_type": "session.revoked", "user_id": "u"})
+    )
 
 
 def test_revocation_cache_disabled_by_default() -> None:

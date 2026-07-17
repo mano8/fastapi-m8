@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from auth_sdk_m8 import has_minimum_role, has_superuser_privileges
 from auth_sdk_m8.authorization import validate_api_key_required_role
 from auth_sdk_m8.core.exceptions import InvalidToken
+from auth_sdk_m8.events import AuthStreamEvent
 from auth_sdk_m8.schemas.api_key import ApiKeyPrincipal
 from auth_sdk_m8.schemas.base import RoleType
 from auth_sdk_m8.schemas.user import UserModel
@@ -51,6 +52,11 @@ _INVALID_API_KEY = "Invalid or expired API key"
 #: issuer already reads, so a key works identically at either end.
 API_KEY_HEADER = "X-API-Key"
 
+#: Canonical stream event types this consumer acts on, dot-spelled as the SDK
+#: payload writes them.
+_SESSION_REVOKED = "session.revoked"
+_USER_DELETED = "user.deleted"
+
 
 def _validate_access_token(validator: Any, token: str) -> Any:
     try:
@@ -63,7 +69,7 @@ def _validate_access_token(validator: Any, token: str) -> Any:
 
 
 async def _check_token_revocation(
-    revocation_client: RemoteRevocationClient | None, jti: str, user_id: str = ""
+    revocation_client: RemoteRevocationClient | None, jti: str, user_id: str
 ) -> None:
     if revocation_client is None:
         return
@@ -220,6 +226,29 @@ class AuthDeps:
     get_current_api_key_reader: Callable | None = None
     get_current_api_key_writer: Callable | None = None
     api_key_client: ApiKeyIntrospectionClient | None = None
+
+    async def handle_auth_event(self, event: AuthStreamEvent) -> None:
+        """
+        Apply one auth stream event to the validation cache.
+
+        Pass this straight to ``build_event_stream_client(..., on_event=...)``:
+        it is the supported way to consume the stream, so no service re-derives
+        the ``session.revoked`` generation/watermark rules (3.5.2) locally.
+        Both v1 and v2 events are accepted. Unknown event types are ignored, and
+        nothing here raises into the stream client.
+
+        Async to satisfy the stream client's awaited callback contract; the work
+        itself is in-memory and never blocks the event loop.
+        """
+        # The SSE `event:` field spells the type with a hyphen; the payload's own
+        # `event_type` uses the SDK's canonical dot. Accept either spelling.
+        event_type = event.event_type.replace("-", ".")
+        if event_type == _SESSION_REVOKED and self.revocation_client is not None:
+            self.revocation_client.apply_session_revoked_event(event.payload)
+        elif event_type == _USER_DELETED:
+            user_id = event.payload.get("user_id")
+            if isinstance(user_id, str):
+                self.evict_user(user_id)
 
     def evict_jti(self, jti: str) -> None:
         """Evict one JTI from the validation cache (on session.revoked event)."""
