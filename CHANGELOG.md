@@ -17,6 +17,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ### Added
 
+- **Remote API-key principal dependencies** — `AuthDeps` gains
+  `get_current_api_key_principal`, the `require_api_key_role(...)` factory, and its
+  `get_current_api_key_reader`/`_writer` specializations, built by the same single
+  `build_auth_deps()` call as the JWT guards. A key presented on `X-API-Key` is
+  resolved to its **owner's current authority** through the issuer's
+  `POST /private/v1/api-keys/introspect`, then authorized with the same shared SDK
+  predicate the JWT guards use. The key itself carries no role, so a
+  `writer → reader` downgrade denies the key's very next request in every token
+  mode. Effective authority is an intersection that can only narrow: the owner's
+  live role ∩ the key's immutable `access_mode` ∩ the matching audience ∩ the route
+  policy. The members are `None` unless `API_KEY_INTROSPECTION_ENABLED=true`.
+- **`ApiKeyIntrospectionClient`** — the issuer introspection client, alongside
+  `RemoteRevocationClient` and following the same split (the SDK owns the schemas,
+  the transport lives here). Bounded connection pool and concurrency semaphore,
+  redirects disabled, a hard response-size cap enforced mid-read, a consecutive-
+  failure circuit breaker, and pool-timeout-bounded load shedding.
+- **Dedicated API-key configuration group** — `API_KEY_INTROSPECTION_ENABLED`,
+  `API_KEY_INTROSPECTION_URL` (or derived from `INTROSPECTION_URL`),
+  `_SCHEMA_VERSION`, `_CONNECT_TIMEOUT`, `_READ_TIMEOUT`, `_POOL_TIMEOUT`,
+  `_MAX_CONCURRENCY`, `_MAX_RESPONSE_BYTES`, `_CIRCUIT_FAILURE_THRESHOLD`, and
+  `_CIRCUIT_RESET_SECONDS`. Enabling the feature without an endpoint,
+  `INTERNAL_CLIENT_ID`, `PRIVATE_API_SECRET`, or with a schema version this SDK
+  release cannot speak **fails at startup**, so a half-configured guard never
+  serves traffic.
+- **Public exports** — `API_KEY_HEADER`, `ApiKeyIntrospectionError`,
+  `ApiKeyQuotaExceededError`, and `derive_api_key_introspection_url`.
 - **`AuthDeps.get_current_active_writer`** — the JWT writer dependency, built by the
   single `build_auth_deps()` call alongside the existing authenticated/admin/superuser
   members. Requires a minimum role of `WRITER`, so `WRITER`/`ADMIN`/`SUPERADMIN` pass
@@ -41,6 +67,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
   is defense in depth for a principal that reaches the dependency inconsistent.
 - **No role guard consults `is_superuser` for a role threshold.** The writer and admin
   dependencies are pure role checks, so a stray `is_superuser=true` can never bypass them.
+- **An API key never grants administrative or superuser authority.** No
+  `get_current_api_key_admin`/`_superuser` dependency exists and no setting creates
+  one — `require_api_key_role()` raises `ApiKeyCapabilityCeilingError` at wiring time
+  for any role above `WRITER`. An owner's `ADMIN`/`SUPERADMIN` role grants an API-key
+  request nothing beyond writer-level capability, and `is_superuser` on the principal
+  is evidence about the owner's record, never authority. (Earlier drafts of this work
+  described a remote `_superuser` specialization disabled behind a per-deployment
+  opt-in; it is **removed**, not disabled-by-default.)
+- **The API-key path is fail-closed with no configurable escape.** It never reads
+  `ACCESS_REVOCATION_FAILURE_MODE`, whose `fail_open` value must not exist here: an
+  issuer outage, timeout, open circuit, shed request, oversized/malformed response,
+  unknown schema version, or an audience mismatch always denies with `503`. There is
+  no fallback to a cached principal, a locally stored role, or bare key validity.
+- **No positive principal caching.** Every capability-bearing request introspects the
+  issuer; only HTTP connection pooling is reused. `auth_generation` on the response is
+  evidence for the current decision, never authorization to reuse the principal later.
+- **No post-transmission retries.** Introspection consumes the key's quota, so only a
+  failure known to precede transmission (connection establishment) is retried once. A
+  read timeout or `5xx` is never replayed, since that could double-charge the owner.
+- **The raw key is confined to the outbound payload.** It is a `SecretStr` in every
+  model, and the request body is built explicitly at the transmission point rather
+  than serialized generically (which would send the mask). It never appears in the
+  URL, query, logs, traces, metrics, exception text, or model `repr`. Redirects are
+  disabled so the key cannot be replayed to an unauthenticated host.
+- **Denials carry no owner-state oracle.** An unknown, revoked, or expired key and
+  every missing/inactive/inconsistent-owner cause share the single generic
+  `401 Invalid or expired API key`, identical to the response for no key at all.
 
 ---
 

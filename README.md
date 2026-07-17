@@ -31,6 +31,7 @@ boilerplate from every consumer service.
    - [Token Modes](#token-modes)
    - [Role System](#role-system)
    - [Protecting Routes](#protecting-routes)
+   - [API-key routes (remote principal)](#api-key-routes-remote-principal)
 8. [Health Endpoint](#health-endpoint)
 9. [Database Integration](#database-integration)
 10. [Pre-Start Script](#pre-start-script)
@@ -52,6 +53,7 @@ health checks; the framework wires the rest.
 |---|---|
 | JWT validation | `build_auth_deps()` + `auth-sdk-m8` validator |
 | Role-based access control | `AuthDeps.get_current_active_writer / _admin / _superuser` |
+| API-key routes (optional) | `AuthDeps.get_current_api_key_reader / _writer` → live owner-role resolution via `fa-auth-m8` introspection; never admin/superuser |
 | Token revocation (stateful mode) | `RemoteRevocationClient` → `fa-auth-m8` private API (optional short-TTL cache via `REVOCATION_CACHE_TTL_SECONDS`) |
 | Auth event stream (optional) | `build_event_stream_client()` → fa-auth SSE bridge for best-effort cache eviction |
 | CORS | Auto-wired from `settings.ALLOWED_ORIGINS` |
@@ -389,6 +391,53 @@ untouched.
 | `SERVICE_TOKEN_SCOPES` | No | `["introspection"]` | Scopes requested when minting a service token; fa-auth narrows to the subset the bootstrap credential was granted. |
 | `SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS` | No | `30` | Refresh a cached service token this many seconds before its `exp` so a call never races expiry. |
 
+### Remote API-Key Principal
+
+Resolves a user API key presented by an external client to its owner's current
+authority through the issuer's private introspection endpoint. Off by default;
+see [API-key routes](#api-key-routes-remote-principal) for the route surface.
+
+This group is **deliberately self-contained and has no fail-open option**. It
+never consults `ACCESS_REVOCATION_FAILURE_MODE` — that knob's `fail_open` value
+must not reach this path, because an unconfirmable API-key principal is always a
+denial rather than a downgrade to bare key validity.
+
+> **Startup fails, not the first request.** When `API_KEY_INTROSPECTION_ENABLED=true`,
+> settings validation fails at construction if there is no endpoint (neither
+> `API_KEY_INTROSPECTION_URL` nor `INTROSPECTION_URL` to derive one from), no
+> `INTERNAL_CLIENT_ID`, no `PRIVATE_API_SECRET`, or a schema version this
+> `auth-sdk-m8` release cannot speak. A half-configured guard never serves traffic.
+
+The consumer's registered identity (`INTERNAL_CLIENT_ID`) is what fixes the
+**audience** the issuer evaluates — it is derived from your credential, never from
+the request — and the issuer echoes it back so the client can verify it. An active
+principal carrying a different audience means the registry mapping or the
+credential is wrong: that is a `503`, never a `401`.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `API_KEY_INTROSPECTION_ENABLED` | No | `false` | Enable the remote API-key principal dependencies. Requires `INTERNAL_CLIENT_ID`, `PRIVATE_API_SECRET`, and an endpoint. |
+| `API_KEY_INTROSPECTION_URL` | No | derived | `POST` endpoint, e.g. `http://auth_user_service:8000/user/private/v1/api-keys/introspect`. Unset = derived from `INTROSPECTION_URL`. |
+| `API_KEY_INTROSPECTION_SCHEMA_VERSION` | No | `"1"` | The contract version this consumer speaks. An unknown version fails at startup; a response declaring one fails closed (`503`). |
+| `API_KEY_INTROSPECTION_CONNECT_TIMEOUT` | No | `2.0` | Connection-establishment timeout, seconds. |
+| `API_KEY_INTROSPECTION_READ_TIMEOUT` | No | `3.0` | Response-read timeout, seconds. |
+| `API_KEY_INTROSPECTION_POOL_TIMEOUT` | No | `2.0` | How long a request waits for concurrency capacity before being **shed** with a `503` instead of queueing onto a saturated issuer. |
+| `API_KEY_INTROSPECTION_MAX_CONCURRENCY` | No | `20` | Ceiling on in-flight introspection calls. |
+| `API_KEY_INTROSPECTION_MAX_RESPONSE_BYTES` | No | `8192` | Hard cap on the issuer response body; a larger reply is abandoned mid-read. |
+| `API_KEY_INTROSPECTION_CIRCUIT_FAILURE_THRESHOLD` | No | `5` | Consecutive issuer failures that open the circuit. |
+| `API_KEY_INTROSPECTION_CIRCUIT_RESET_SECONDS` | No | `30.0` | How long the circuit stays open before one trial call is admitted. |
+
+The issuer must grant this consumer the dedicated `api-key-introspection` scope.
+It is deliberately separate from `introspection`, so a consumer that checks JTI
+status is not implicitly able to introspect user API keys — grant it explicitly.
+
+**The key is never cached and never retried after transmission.** Every
+capability-bearing request introspects the issuer (connection pooling is the only
+reuse), so a downgrade lands immediately and a transport failure can never be
+answered from a stale success. Because introspection consumes the key's quota,
+only a failure known to have occurred *before* transmission (connection
+establishment) is retried; a read timeout or `5xx` is never replayed.
+
 ### Auth Event Stream (fa-auth SSE bridge)
 
 An **optional, best-effort accelerator** for cache eviction. `fa-auth-m8` bridges its
@@ -704,6 +753,13 @@ Returns a frozen dataclass with everything needed for route protection.
 | `auth.get_current_active_admin` | `Callable` | Raises 403 unless user has ADMIN or SUPERADMIN role |
 | `auth.get_current_active_superuser` | `Callable` | Raises 403 unless user has SUPERADMIN role **and** `is_superuser=True` (both are required; neither claim grants privilege on its own) |
 | `auth.revocation_client` | `RemoteRevocationClient \| None` | Present only in stateful mode |
+| `auth.get_current_api_key_principal` | `async Callable \| None` | Resolves an `X-API-Key` to its owner's **current** authority via the issuer. Proves a live owner only — never writer capability |
+| `auth.require_api_key_role` | `Callable \| None` | Factory: `require_api_key_role(RoleType.WRITER)` builds a capability dependency. Rejects any role above `WRITER` |
+| `auth.get_current_api_key_reader` | `async Callable \| None` | Raises 403 unless the key's owner is at least READER |
+| `auth.get_current_api_key_writer` | `async Callable \| None` | Raises 403 unless the key's owner is at least WRITER **and** the key is `read_write` |
+| `auth.api_key_client` | `ApiKeyIntrospectionClient \| None` | Present only when `API_KEY_INTROSPECTION_ENABLED` |
+
+The four API-key members are `None` unless `API_KEY_INTROSPECTION_ENABLED=true`.
 
 **`UserModel` fields available in routes:**
 
@@ -893,6 +949,67 @@ Unauthorized requests receive:
 
 - `401 Unauthorized` — missing or invalid token
 - `403 Forbidden` — valid token but insufficient role
+
+---
+
+### API-key routes (remote principal)
+
+An API key is an opaque pointer to its **owner**, not a credential with
+capabilities of its own — it stores no role. A downstream service does not share
+the issuer's database, so it resolves the owner's **current** role by calling the
+issuer on every capability-bearing request. That is what makes a role downgrade
+take effect on the key's next request, in every token mode.
+
+Enable it with `API_KEY_INTROSPECTION_ENABLED=true` (see
+[Remote API-Key Principal](#remote-api-key-principal)); the dependencies are
+`None` until you do. The key travels on the `X-API-Key` header — the same header
+the issuer reads, so a key behaves identically at either end.
+
+```python
+# Reads only — the owner must be at least READER.
+@router.get("/items")
+async def list_items(
+    principal: Annotated[ApiKeyPrincipal, Depends(auth.get_current_api_key_reader)],
+):
+    ...
+
+# Writes — the owner must be at least WRITER *and* the key must be read_write.
+@router.post("/items")
+async def create_item(
+    principal: Annotated[ApiKeyPrincipal, Depends(auth.get_current_api_key_writer)],
+):
+    ...
+```
+
+Effective authority is an intersection, and every dimension can only narrow it:
+
+```text
+owner's current role  ∩  key access_mode  ∩  matching audience  ∩  route policy
+```
+
+So a `read_only` key owned by a writer cannot write; a `read_write` key owned by
+a reader cannot write; and deactivating an owner denies every key they hold.
+
+**API keys never carry administrative or superuser authority** — not from the
+owner's role, not from `is_superuser`, and not by configuration. There is no
+`get_current_api_key_admin`/`_superuser` dependency and no setting that creates
+one; `require_api_key_role()` raises `ApiKeyCapabilityCeilingError` at wiring
+time for anything above `WRITER`. Keep those operations on the JWT guards.
+
+> **Depending on `get_current_api_key_principal` never implies write
+> capability.** It proves only that the key resolves to a live owner. Every
+> capability-bearing route must use a role dependency.
+
+Responses:
+
+- `401 Invalid or expired API key` — one generic denial covering an unknown,
+  revoked, or expired key *and* every owner-state cause, so a caller cannot probe
+  another account's state
+- `403 Forbidden` — the owner's role or the key's access mode is insufficient
+- `429` — the key's quota is exhausted; the issuer's `Retry-After` is relayed
+- `503` — the principal could not be confirmed (issuer outage, timeout, open
+  circuit, shed load, or a response this release cannot interpret). **Always a
+  denial** — there is no fallback to a cached principal or to bare key validity
 
 ---
 
