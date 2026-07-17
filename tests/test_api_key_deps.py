@@ -268,6 +268,14 @@ def test_malformed_response_fails_closed_with_503() -> None:
     assert response.status_code == 503
 
 
+def test_unknown_schema_version_fails_closed_with_503() -> None:
+    """A response declaring a contract version this consumer cannot speak denies."""
+    auth = _auth_with(_responder(200, _active_body(schema_version="99")))
+    client = _client_for(auth, auth.get_current_api_key_writer)
+    response = client.get("/thing", headers={"X-API-Key": RAW_KEY})
+    assert response.status_code == 503
+
+
 def test_audience_mismatch_fails_closed_with_503_not_401() -> None:
     """A principal minted for another audience is a config fault, not a bad key."""
     auth = _auth_with(_responder(200, _active_body(audience="someone-else")))

@@ -13,6 +13,7 @@ Tier 1 — remote API-key principal (issuer introspection)::
 
     from fastapi_m8 import API_KEY_HEADER, derive_api_key_introspection_url
     from fastapi_m8 import ApiKeyIntrospectionError, ApiKeyQuotaExceededError
+    from fastapi_m8 import audit_api_key_routes, BareApiKeyDependency
 
 Tier 1 — auth event stream (fa-auth SSE bridge)::
 
@@ -68,6 +69,9 @@ from fastapi_m8._internal_auth import (
     build_internal_auth,
     derive_service_token_url,
 )
+
+# Tier 1 — API-key route-wiring audit (§3.3.1)
+from fastapi_m8._route_audit import BareApiKeyDependency, audit_api_key_routes
 from fastapi_m8._version import __version__
 from fastapi_m8.config import ConsumerServiceSettings
 
@@ -87,6 +91,8 @@ __all__ = [
     "ApiKeyIntrospectionError",
     "ApiKeyQuotaExceededError",
     "derive_api_key_introspection_url",
+    "audit_api_key_routes",
+    "BareApiKeyDependency",
     # Tier 1 — per-consumer internal-auth
     "build_internal_auth",
     "InternalAuthProvider",

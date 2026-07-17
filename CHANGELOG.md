@@ -69,6 +69,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
   members. Requires a minimum role of `WRITER`, so `WRITER`/`ADMIN`/`SUPERADMIN` pass
   and `USER`/`READER` receive the unchanged `403 "The user doesn't have enough
   privileges"` response.
+- **`audit_api_key_routes(app, bare_dependency=..., exempt_paths=...)`** — walks a
+  built `FastAPI` app's routes and reports any that depend directly on the bare
+  `get_current_api_key_principal` instead of a role-capped dependency
+  (`require_api_key_role(...)`'s output). Depending on the bare dependency alone
+  grants no capability, but a route wired to it directly is a wiring mistake this
+  catches at test time (§3.3.1). Returns `BareApiKeyDependency(path, methods)`
+  findings; an explicit `exempt_paths` allowlist covers intentional read-only
+  routes (e.g. a `/verify`-style endpoint).
 
 ### Changed
 

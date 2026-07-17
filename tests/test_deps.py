@@ -64,6 +64,56 @@ def test_build_auth_deps_stateful_creates_revocation_client() -> None:
     assert auth.revocation_client is not None
 
 
+# ── single-builder contract: no implicit cache across calls ──────────────────
+
+
+def test_second_build_call_yields_an_independent_revocation_client() -> None:
+    """A second build_auth_deps() call builds its own validator/client — no cache.
+
+    ``build_auth_deps`` is documented as a one-call-per-service factory; a
+    second call must not silently reuse or share state with the first, or two
+    services (or two calls in the same process) would cross-contaminate their
+    revocation caches.
+    """
+    s = make_settings(
+        TOKEN_MODE="stateful",
+        INTROSPECTION_URL="http://auth:8000/private/v1/jti-status",
+        PRIVATE_API_SECRET="supersecret",
+    )
+    first = build_auth_deps(s)
+    second = build_auth_deps(s)
+    assert first.revocation_client is not None
+    assert second.revocation_client is not None
+    assert first.revocation_client is not second.revocation_client
+    assert first is not second
+
+
+def test_second_build_call_yields_an_independent_api_key_client() -> None:
+    """A second build_auth_deps() call builds its own API-key client too."""
+    s = make_settings(
+        API_KEY_INTROSPECTION_ENABLED=True,
+        INTERNAL_CLIENT_ID="consumer-a",
+        PRIVATE_API_SECRET="supersecret",
+        INTROSPECTION_URL="http://auth:8000/user/private/v1/jti-status",
+    )
+    first = build_auth_deps(s)
+    second = build_auth_deps(s)
+    assert first.api_key_client is not None
+    assert second.api_key_client is not None
+    assert first.api_key_client is not second.api_key_client
+    assert (
+        first.get_current_api_key_principal is not second.get_current_api_key_principal
+    )
+
+
+def test_second_build_call_yields_independent_jwt_guard_closures() -> None:
+    """The JWT guards themselves are fresh closures each call, not memoized."""
+    auth1 = build_auth_deps(make_settings())
+    auth2 = build_auth_deps(make_settings())
+    assert auth1.get_current_user is not auth2.get_current_user
+    assert auth1.get_current_active_writer is not auth2.get_current_active_writer
+
+
 # ── AuthDeps.close ────────────────────────────────────────────────────────────
 
 
