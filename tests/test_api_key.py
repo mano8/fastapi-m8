@@ -13,6 +13,7 @@ from pydantic import SecretStr
 from fastapi_m8._api_key import (
     ApiKeyIntrospectionClient,
     ApiKeyIntrospectionError,
+    ApiKeyIntrospectionTuning,
     ApiKeyQuotaExceededError,
     _CircuitBreaker,
     derive_api_key_introspection_url,
@@ -79,7 +80,7 @@ def _make_client(handler, **overrides) -> ApiKeyIntrospectionClient:
         introspection_url=URL,
         auth_provider=overrides.pop("auth_provider", _FakeAuth()),
         audience_id=overrides.pop("audience_id", AUDIENCE),
-        **overrides,
+        tuning=ApiKeyIntrospectionTuning(**overrides),
     )
     client._client._transport = httpx.MockTransport(handler)
     return client

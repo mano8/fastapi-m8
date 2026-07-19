@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 
 import anyio
 import httpx
@@ -143,6 +144,26 @@ class _CircuitBreaker:
             )
 
 
+@dataclass(frozen=True)
+class ApiKeyIntrospectionTuning:
+    """
+    Tuning knobs for :class:`ApiKeyIntrospectionClient`.
+
+    Bundles timeouts, concurrency, response-size, and circuit-breaker limits so
+    the client's constructor stays small regardless of how many independent
+    limits it enforces.
+    """
+
+    schema_version: str = API_KEY_INTROSPECTION_SCHEMA_VERSION
+    connect_timeout: float = 2.0
+    read_timeout: float = 3.0
+    pool_timeout: float = 2.0
+    max_concurrency: int = 20
+    max_response_bytes: int = 8192
+    circuit_failure_threshold: int = 5
+    circuit_reset_seconds: float = 30.0
+
+
 class ApiKeyIntrospectionClient:
     """
     Async HTTP client resolving an API key to its owner's canonical principal.
@@ -159,15 +180,8 @@ class ApiKeyIntrospectionClient:
         audience_id: This consumer's own registry identity. An active response
             must echo it back, or the result is refused as a trusted-configuration
             failure.
-        schema_version: The contract version this client speaks.
-        connect_timeout: Connection-establishment timeout, seconds.
-        read_timeout: Response-read timeout, seconds.
-        pool_timeout: Bound on waiting for pool/concurrency capacity, seconds;
-            exceeding it sheds the request rather than queueing it.
-        max_concurrency: Ceiling on in-flight introspection calls.
-        max_response_bytes: Hard cap on the response body read from the issuer.
-        circuit_failure_threshold: Consecutive failures that open the circuit.
-        circuit_reset_seconds: How long the circuit stays open.
+        tuning: Timeouts, concurrency, response-size, and circuit-breaker knobs.
+            See :class:`ApiKeyIntrospectionTuning`.
 
     """
 
@@ -177,47 +191,40 @@ class ApiKeyIntrospectionClient:
         introspection_url: str,
         auth_provider: InternalAuthProvider,
         audience_id: str,
-        schema_version: str = API_KEY_INTROSPECTION_SCHEMA_VERSION,
-        connect_timeout: float = 2.0,
-        read_timeout: float = 3.0,
-        pool_timeout: float = 2.0,
-        max_concurrency: int = 20,
-        max_response_bytes: int = 8192,
-        circuit_failure_threshold: int = 5,
-        circuit_reset_seconds: float = 30.0,
+        tuning: ApiKeyIntrospectionTuning = ApiKeyIntrospectionTuning(),
     ) -> None:
         """Initialise the bounded HTTP client, semaphore, and circuit breaker."""
         self._url = introspection_url
         self._auth = auth_provider
         self._audience_id = audience_id
-        self._schema_version = schema_version
-        self._max_response_bytes = max_response_bytes
-        self._pool_timeout = pool_timeout
+        self._schema_version = tuning.schema_version
+        self._max_response_bytes = tuning.max_response_bytes
+        self._pool_timeout = tuning.pool_timeout
         # anyio (not asyncio) primitives: fastapi-m8 supports any AnyIO backend.
-        self._semaphore = anyio.Semaphore(max_concurrency)
+        self._semaphore = anyio.Semaphore(tuning.max_concurrency)
         self._breaker = _CircuitBreaker(
-            failure_threshold=circuit_failure_threshold,
-            reset_seconds=circuit_reset_seconds,
+            failure_threshold=tuning.circuit_failure_threshold,
+            reset_seconds=tuning.circuit_reset_seconds,
         )
         self._client = httpx.AsyncClient(
             # Redirects are never followed: a redirect would replay the raw key
             # to a host this consumer never authenticated to.
             follow_redirects=False,
-            limits=httpx.Limits(max_connections=max_concurrency),
+            limits=httpx.Limits(max_connections=tuning.max_concurrency),
             timeout=httpx.Timeout(
-                connect=connect_timeout,
-                read=read_timeout,
+                connect=tuning.connect_timeout,
+                read=tuning.read_timeout,
                 write=2.0,
-                pool=pool_timeout,
+                pool=tuning.pool_timeout,
             ),
         )
         # URL/identity are configuration, not secrets; the credential never is.
-        _logger.info(
+        _logger.info(  # nosemgrep — logs audience/schema_version/concurrency only
             "api_key.introspection enabled audience=%s schema_version=%s "
             "max_concurrency=%d",
             audience_id,
-            schema_version,
-            max_concurrency,
+            tuning.schema_version,
+            tuning.max_concurrency,
         )
 
     async def introspect(self, api_key: SecretStr) -> ApiKeyPrincipal | None:
@@ -273,7 +280,9 @@ class ApiKeyIntrospectionClient:
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
             # Pre-transmission only: the connection was never established, so
             # the issuer cannot have seen the request or charged the quota.
-            _logger.warning("api_key.introspection connect_retry error=%s", type(exc))
+            _logger.warning(  # nosemgrep — logs the exception type only, never its value
+                "api_key.introspection connect_retry error=%s", type(exc)
+            )
             try:
                 return await self._transmit(request)
             except httpx.HTTPError as retry_exc:
@@ -350,7 +359,7 @@ class ApiKeyIntrospectionClient:
             # An active principal minted for someone else means the internal
             # credential or the registry mapping is wrong. That is a trusted
             # configuration failure, not a denial of this key — 503, never 401.
-            _logger.error(
+            _logger.error(  # nosemgrep — logs this consumer's own audience id, not a secret
                 "api_key.introspection audience_mismatch expected=%s",
                 self._audience_id,
             )

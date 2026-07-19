@@ -26,6 +26,7 @@ from pydantic import SecretStr
 from fastapi_m8._api_key import (
     ApiKeyIntrospectionClient,
     ApiKeyIntrospectionError,
+    ApiKeyIntrospectionTuning,
     ApiKeyQuotaExceededError,
 )
 from fastapi_m8._compat import _assert_compat
@@ -130,16 +131,20 @@ def _build_api_key_client(
         # registry identity and echoes it back; the client refuses a principal
         # minted for anyone else.
         audience_id=str(settings.INTERNAL_CLIENT_ID),
-        schema_version=settings.API_KEY_INTROSPECTION_SCHEMA_VERSION,
-        connect_timeout=settings.API_KEY_INTROSPECTION_CONNECT_TIMEOUT,
-        read_timeout=settings.API_KEY_INTROSPECTION_READ_TIMEOUT,
-        pool_timeout=settings.API_KEY_INTROSPECTION_POOL_TIMEOUT,
-        max_concurrency=settings.API_KEY_INTROSPECTION_MAX_CONCURRENCY,
-        max_response_bytes=settings.API_KEY_INTROSPECTION_MAX_RESPONSE_BYTES,
-        circuit_failure_threshold=(
-            settings.API_KEY_INTROSPECTION_CIRCUIT_FAILURE_THRESHOLD
+        tuning=ApiKeyIntrospectionTuning(
+            schema_version=settings.API_KEY_INTROSPECTION_SCHEMA_VERSION,
+            connect_timeout=settings.API_KEY_INTROSPECTION_CONNECT_TIMEOUT,
+            read_timeout=settings.API_KEY_INTROSPECTION_READ_TIMEOUT,
+            pool_timeout=settings.API_KEY_INTROSPECTION_POOL_TIMEOUT,
+            max_concurrency=settings.API_KEY_INTROSPECTION_MAX_CONCURRENCY,
+            max_response_bytes=settings.API_KEY_INTROSPECTION_MAX_RESPONSE_BYTES,
+            circuit_failure_threshold=(
+                settings.API_KEY_INTROSPECTION_CIRCUIT_FAILURE_THRESHOLD
+            ),
+            circuit_reset_seconds=(
+                settings.API_KEY_INTROSPECTION_CIRCUIT_RESET_SECONDS
+            ),
         ),
-        circuit_reset_seconds=settings.API_KEY_INTROSPECTION_CIRCUIT_RESET_SECONDS,
     )
 
 
@@ -443,7 +448,11 @@ def _build_api_key_deps(client: ApiKeyIntrospectionClient) -> dict[str, Callable
         except ApiKeyIntrospectionError as ex:
             # Fail closed, always: an unconfirmable principal is a denial, never
             # a fallback to bare key validity or to a previously seen result.
-            _logger.warning("security.api_key_denied reason=unverifiable error=%s", ex)
+            # str(ex) is the bounded reason code only (see ApiKeyIntrospectionError),
+            # never the presented key, the response body, or the internal credential.
+            _logger.warning(  # nosemgrep
+                "security.api_key_denied reason=unverifiable error=%s", ex
+            )
             raise HTTPException(
                 status_code=_UNAVAILABLE,
                 detail="API key verification unavailable.",
