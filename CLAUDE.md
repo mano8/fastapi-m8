@@ -1,12 +1,12 @@
 # fastapi-m8
 
 ## Layer
-Platform (FastAPI base template / scaffolding)
+Platform (FastAPI application framework)
 
 ---
 
 ## Purpose
-Base structure for FastAPI microservices.
+Application factory wiring `auth-sdk-m8` into FastAPI services using `fa-auth-m8`.
 
 ---
 
@@ -18,5 +18,10 @@ Base structure for FastAPI microservices.
 
 ---
 
-## Authority
-All rules come from /.workspace/policy.index.json (type: python)
+## Workspace integration
+
+When nested in a workspace, locate the nearest ancestor containing
+`.workspace/policy.index.json` and apply its `python` policy.
+
+If no workspace policy exists, use this file, `pyproject.toml`, repository
+documentation and existing CI as the authoritative local context.
