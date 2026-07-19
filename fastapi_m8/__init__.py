@@ -9,6 +9,12 @@ Tier 1 — everyday service API::
     from fastapi_m8 import create_db_engine, DbEngine
     from fastapi_m8 import ConsumerServiceSettings
 
+Tier 1 — remote API-key principal (issuer introspection)::
+
+    from fastapi_m8 import API_KEY_HEADER, derive_api_key_introspection_url
+    from fastapi_m8 import ApiKeyIntrospectionError, ApiKeyQuotaExceededError
+    from fastapi_m8 import audit_api_key_routes, BareApiKeyDependency
+
 Tier 1 — auth event stream (fa-auth SSE bridge)::
 
     from fastapi_m8 import build_event_stream_client
@@ -27,12 +33,17 @@ Tier 3 — informational / future::
 """
 
 # Tier 1
+from fastapi_m8._api_key import (
+    ApiKeyIntrospectionError,
+    ApiKeyQuotaExceededError,
+    derive_api_key_introspection_url,
+)
 from fastapi_m8._app import AppLifecycle, HealthConfig, create_app
 
 # Tier 3
 from fastapi_m8._async_stub import CAPABILITIES, capabilities, create_async_app
 from fastapi_m8._compat import COMPAT_MATRIX
-from fastapi_m8._deps import AuthDeps, build_auth_deps
+from fastapi_m8._deps import API_KEY_HEADER, AuthDeps, build_auth_deps
 from fastapi_m8._engine import DbEngine, create_db_engine
 
 # Tier 1 — auth event stream
@@ -58,6 +69,9 @@ from fastapi_m8._internal_auth import (
     build_internal_auth,
     derive_service_token_url,
 )
+
+# Tier 1 — API-key route-wiring audit (§3.3.1)
+from fastapi_m8._route_audit import BareApiKeyDependency, audit_api_key_routes
 from fastapi_m8._version import __version__
 from fastapi_m8.config import ConsumerServiceSettings
 
@@ -72,6 +86,13 @@ __all__ = [
     "create_db_engine",
     "DbEngine",
     "ConsumerServiceSettings",
+    # Tier 1 — remote API-key principal (§3.12)
+    "API_KEY_HEADER",
+    "ApiKeyIntrospectionError",
+    "ApiKeyQuotaExceededError",
+    "derive_api_key_introspection_url",
+    "audit_api_key_routes",
+    "BareApiKeyDependency",
     # Tier 1 — per-consumer internal-auth
     "build_internal_auth",
     "InternalAuthProvider",

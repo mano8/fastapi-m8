@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fastapi-m8"
-version = "3.3.0"
+version = "4.0.0"
 description = "FastAPI application framework for m8 consumer microservices."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -27,7 +27,7 @@ dependencies = [
     "httpx>=0.27.0",
     "packaging>=24.0",
     "anyio>=4.0",
-    "auth-sdk-m8[config,security,fastapi,observability,events]>=2.1.1,<3.0.0",
+    "auth-sdk-m8[config,security,fastapi,observability,events]>=3.0.0,<4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +39,12 @@ dev      = ["fastapi-m8[all]", "pytest>=8.0", "anyio[trio]>=4.0", "httpx",
             "ruff>=0.9.0", "mypy>=1.14.0", "bandit>=1.8.0", "pip-audit>=2.7.3",
             "pytest-anyio>=0.0.0", "tenacity>=9.0",
             "coverage>=7.0", "pytest-cov>=6.0",
-            "asgi-lifespan>=2.0"]
+            "asgi-lifespan>=2.0",
+            # Build backend + frontend, used with --no-isolation by the packed
+            # wheel/sdist export test (tests/test_packaging.py) so it verifies
+            # the real build without a network round-trip to re-resolve
+            # hatchling.
+            "hatchling>=1.27.0", "build>=1.2.2"]
 
 [project.scripts]
 fastapi-m8-prestart = "fastapi_m8.scripts.pre_start:main"

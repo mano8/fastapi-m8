@@ -49,6 +49,36 @@ def test_assert_compat_raises_on_bad_version() -> None:
     _reset_compat()  # clean up for subsequent tests
 
 
+def test_compat_matrix_40_row_matches_pyproject_floor() -> None:
+    """The 4.0 gate is exactly the auth-sdk-m8 3.0.0 major floor."""
+    assert COMPAT_MATRIX["4.0"] == {"auth-sdk-m8": ">=3.0.0,<4.0.0"}
+
+
+def test_assert_compat_40_row_accepts_intended_sdk_major() -> None:
+    """The 4.0 gate accepts the released/local SDK major it targets (3.0.0)."""
+    _reset_compat()
+    with (
+        patch("fastapi_m8._compat.__version__", "4.0.0"),
+        patch("fastapi_m8._compat.md.version", return_value="3.0.0"),
+    ):
+        _assert_compat()  # should not raise: 3.0.0 is in >=3.0.0,<4.0.0
+    assert _COMPAT_STATE["checked"] is True
+    assert _COMPAT_STATE["auth_version"] == "3.0.0"
+    _reset_compat()
+
+
+def test_assert_compat_40_row_rejects_old_major() -> None:
+    """The 4.0 gate rejects the pre-invariant 2.x SDK it must not silently run against."""
+    _reset_compat()
+    with (
+        patch("fastapi_m8._compat.__version__", "4.0.0"),
+        patch("fastapi_m8._compat.md.version", return_value="2.1.1"),
+    ):
+        with pytest.raises(RuntimeError, match="requires auth-sdk-m8"):
+            _assert_compat()
+    _reset_compat()
+
+
 def test_assert_compat_thread_safe() -> None:
     """Concurrent calls must each see checked=True without racing."""
     _reset_compat()

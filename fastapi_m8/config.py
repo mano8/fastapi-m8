@@ -21,9 +21,18 @@ Example::
 
 from auth_sdk_m8.core.config import CommonSettings
 from auth_sdk_m8.core.consumer import ConsumerAuthMixin
+from auth_sdk_m8.core.exceptions import UnsupportedApiKeySchemaVersionError
 from auth_sdk_m8.observability.settings import ObservabilitySettingsMixin
+from auth_sdk_m8.schemas.api_key import (
+    API_KEY_INTROSPECTION_SCHEMA_VERSION as _SDK_API_KEY_SCHEMA_VERSION,
+)
+from auth_sdk_m8.schemas.api_key import (
+    validate_api_key_introspection_schema_version,
+)
 from auth_sdk_m8.schemas.meta import ServiceContract, ServiceMeta
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, HttpUrl, SecretStr, model_validator
+
+from fastapi_m8._api_key import derive_api_key_introspection_url
 
 
 class ConsumerServiceSettings(
@@ -125,6 +134,48 @@ class ConsumerServiceSettings(
         30, ge=0, description="Seconds before exp to refresh a service token."
     )
 
+    # ── Remote API-key principal resolution (§3.12) ──────────────────────────
+    # Configuration for resolving a user API key to its owner's current
+    # authority through the issuer's private introspection endpoint.
+    #
+    # Deliberately a dedicated, self-contained group: it never consults
+    # ACCESS_REVOCATION_FAILURE_MODE. That knob carries a fail_open option, and
+    # no equivalent may exist here — an API-key principal that cannot be
+    # confirmed with the issuer is always a denial, never a downgrade to bare
+    # key validity. When this group is enabled and anything it needs is missing,
+    # startup fails rather than serving traffic on a half-configured guard.
+    API_KEY_INTROSPECTION_ENABLED: bool = Field(
+        False,
+        description=(
+            "Enable the remote API-key principal dependencies. Requires "
+            "INTERNAL_CLIENT_ID, PRIVATE_API_SECRET, and an introspection URL."
+        ),
+    )
+    # Explicit endpoint; when unset it is derived from INTROSPECTION_URL
+    # (…/private/v1/jti-status → …/private/v1/api-keys/introspect).
+    API_KEY_INTROSPECTION_URL: HttpUrl | None = Field(
+        None,
+        description=(
+            "Issuer POST /private/v1/api-keys/introspect URL. Unset = derived "
+            "from INTROSPECTION_URL."
+        ),
+    )
+    API_KEY_INTROSPECTION_CONNECT_TIMEOUT: float = Field(2.0, gt=0, le=30)
+    API_KEY_INTROSPECTION_READ_TIMEOUT: float = Field(3.0, gt=0, le=30)
+    # Bounds how long a request waits for concurrency capacity before it is shed
+    # with a 503 instead of queueing onto an already-saturated issuer.
+    API_KEY_INTROSPECTION_POOL_TIMEOUT: float = Field(2.0, gt=0, le=30)
+    API_KEY_INTROSPECTION_MAX_CONCURRENCY: int = Field(20, ge=1, le=1000)
+    API_KEY_INTROSPECTION_MAX_RESPONSE_BYTES: int = Field(8192, ge=256, le=1_048_576)
+    # The contract version this consumer speaks. An unknown version fails at
+    # startup rather than at the first authorization decision.
+    API_KEY_INTROSPECTION_SCHEMA_VERSION: str = Field(
+        _SDK_API_KEY_SCHEMA_VERSION,
+        description="API-key introspection contract version to speak.",
+    )
+    API_KEY_INTROSPECTION_CIRCUIT_FAILURE_THRESHOLD: int = Field(5, ge=1, le=1000)
+    API_KEY_INTROSPECTION_CIRCUIT_RESET_SECONDS: float = Field(30.0, gt=0, le=3600)
+
     # ── Health-detail gating (item 9.3) ──────────────────────────────────────
     # Dedicated credential for the deep-/health detail body gate.  Unset
     # (default) = detail body never shown (fail-closed); callers only see the
@@ -191,6 +242,64 @@ class ConsumerServiceSettings(
                 range=self.CONTRACT_RANGE,
             ),
         )
+
+    def effective_api_key_introspection_url(self) -> str:
+        """
+        Return the API-key introspection endpoint this consumer will call.
+
+        Prefers the explicit ``API_KEY_INTROSPECTION_URL`` and otherwise derives
+        it from ``INTROSPECTION_URL``. Only valid once
+        ``_validate_api_key_introspection`` has confirmed one of the two is set,
+        so it is called after construction, never during it.
+        """
+        if self.API_KEY_INTROSPECTION_URL is not None:
+            return str(self.API_KEY_INTROSPECTION_URL)
+        return derive_api_key_introspection_url(str(self.INTROSPECTION_URL))
+
+    @model_validator(mode="after")
+    def _validate_api_key_introspection(self) -> "ConsumerServiceSettings":
+        """
+        Fail closed at construction on an incomplete API-key config (§3.12).
+
+        The remote API-key dependencies have no degraded mode: every dimension
+        of the decision — the endpoint, this consumer's credential, the registry
+        identity that fixes the evaluated audience, and the contract version — is
+        mandatory once they are enabled. Missing any of them is a deployment
+        fault, so it stops the service at boot rather than surfacing later as a
+        stream of 503s. No message echoes a secret.
+        """
+        if not self.API_KEY_INTROSPECTION_ENABLED:
+            return self
+        if self.API_KEY_INTROSPECTION_URL is None and self.INTROSPECTION_URL is None:
+            raise ValueError(
+                "CONFIG: API_KEY_INTROSPECTION_ENABLED=true requires "
+                "API_KEY_INTROSPECTION_URL, or INTROSPECTION_URL to derive it "
+                "from — the remote API-key principal has no local fallback."
+            )
+        if not self.INTERNAL_CLIENT_ID:
+            raise ValueError(
+                "CONFIG: API_KEY_INTROSPECTION_ENABLED=true requires "
+                "INTERNAL_CLIENT_ID — the issuer derives the evaluated audience "
+                "from this consumer's registry identity, and the consumer "
+                "verifies the echoed audience_id against it."
+            )
+        if self.PRIVATE_API_SECRET is None:
+            raise ValueError(
+                "CONFIG: API_KEY_INTROSPECTION_ENABLED=true requires "
+                "PRIVATE_API_SECRET — introspection is a private issuer route "
+                "and needs this consumer's internal credential."
+            )
+        try:
+            validate_api_key_introspection_schema_version(
+                self.API_KEY_INTROSPECTION_SCHEMA_VERSION
+            )
+        except UnsupportedApiKeySchemaVersionError as ex:
+            raise ValueError(
+                "CONFIG: API_KEY_INTROSPECTION_SCHEMA_VERSION is not a version "
+                "this auth-sdk-m8 release implements — a consumer must never "
+                "guess at a contract it cannot interpret."
+            ) from ex
+        return self
 
     @model_validator(mode="after")
     def _validate_consumer_private_auth(self) -> "ConsumerServiceSettings":

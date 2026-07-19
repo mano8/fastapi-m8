@@ -5,7 +5,135 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [Unreleased]
+## [4.0.0] — 2026-07-17 · auth-sdk-m8 3.0.0 alignment — canonical role/flag invariant + JTI-status v2 + remote API-key principal
+
+> **MAJOR — coordinated release with `auth-sdk-m8 3.0.0`.** `fastapi-m8` raises the SDK
+> floor to `>=3.0.0,<4.0.0` to consume the canonical role/flag authorization invariant
+> (`has_superuser_privileges()` and `has_minimum_role()`), the subject-bound JTI-status v2
+> introspection contract, and the API-key principal/introspection schemas. All role guards
+> now delegate to the shared SDK policy helpers, and the new remote API-key principal
+> dependencies (`get_current_api_key_reader`/`_writer` and `require_api_key_role(...)`)
+> resolve a key to its owner's **current** authority through the issuer's introspection
+> endpoint, with no administrative or superuser capability surface. The API-key path is
+> inherently fail-closed, never caches a positive principal, and never retries after
+> transmission — ensuring a role downgrade lands on the key's very next request.
+
+### Added
+
+- **JTI-status v2 (subject-bound, generation-tagged)** — `RemoteRevocationClient`
+  now speaks the v2 introspection contract: the request asserts the subject read
+  from the token (`{jti, expected_user_id, schema_version}`), and an active reply
+  carries the owner's `auth_generation`, which tags the cache entry it produces.
+  As defense in depth an active reply naming a different subject is refused and
+  never cached. **The v2 decision never falls open:** a reply this release cannot
+  interpret — malformed, unknown `schema_version`, or a pre-2.0 issuer's bare
+  `{"active": true}` with no generation — raises the new `RevocationDecisionError`
+  (a `RevocationCheckError`, so dependencies still answer `503`) regardless of
+  `ACCESS_REVOCATION_FAILURE_MODE`, which remains a transport-outage escape only.
+- **`AuthDeps.handle_auth_event(event)`** — the supported `on_event` handler for
+  `build_event_stream_client`, so no service re-derives the eviction rules
+  locally. Accepts **both v1 and v2** `session-revoked` events for the rollout
+  interval in which the issuer emits v2 before every consumer has upgraded, and
+  routes `user-deleted` as before. v2 events apply the exact `<`/`==`/`>`
+  watermark rule per user, deduplicated on the durable `event_id` (never the SSE
+  transport id, which resets on issuer restart), so a replay is idempotent while
+  sibling JTI events at one generation stay distinguishable. A user-wide event
+  evicts the user's entries older than the revoking generation and spares
+  sessions minted after it. A v1 event carries no generation to compare, so it
+  evicts the whole user; an unusable payload flushes the cache.
+- **Remote API-key principal dependencies** — `AuthDeps` gains
+  `get_current_api_key_principal`, the `require_api_key_role(...)` factory, and its
+  `get_current_api_key_reader`/`_writer` specializations, built by the same single
+  `build_auth_deps()` call as the JWT guards. A key presented on `X-API-Key` is
+  resolved to its **owner's current authority** through the issuer's
+  `POST /private/v1/api-keys/introspect`, then authorized with the same shared SDK
+  predicate the JWT guards use. The key itself carries no role, so a
+  `writer → reader` downgrade denies the key's very next request in every token
+  mode. Effective authority is an intersection that can only narrow: the owner's
+  live role ∩ the key's immutable `access_mode` ∩ the matching audience ∩ the route
+  policy. The members are `None` unless `API_KEY_INTROSPECTION_ENABLED=true`.
+- **`ApiKeyIntrospectionClient`** — the issuer introspection client, alongside
+  `RemoteRevocationClient` and following the same split (the SDK owns the schemas,
+  the transport lives here). Bounded connection pool and concurrency semaphore,
+  redirects disabled, a hard response-size cap enforced mid-read, a consecutive-
+  failure circuit breaker, and pool-timeout-bounded load shedding.
+- **Dedicated API-key configuration group** — `API_KEY_INTROSPECTION_ENABLED`,
+  `API_KEY_INTROSPECTION_URL` (or derived from `INTROSPECTION_URL`),
+  `_SCHEMA_VERSION`, `_CONNECT_TIMEOUT`, `_READ_TIMEOUT`, `_POOL_TIMEOUT`,
+  `_MAX_CONCURRENCY`, `_MAX_RESPONSE_BYTES`, `_CIRCUIT_FAILURE_THRESHOLD`, and
+  `_CIRCUIT_RESET_SECONDS`. Enabling the feature without an endpoint,
+  `INTERNAL_CLIENT_ID`, `PRIVATE_API_SECRET`, or with a schema version this SDK
+  release cannot speak **fails at startup**, so a half-configured guard never
+  serves traffic.
+- **Public exports** — `API_KEY_HEADER`, `ApiKeyIntrospectionError`,
+  `ApiKeyQuotaExceededError`, and `derive_api_key_introspection_url`.
+- **`AuthDeps.get_current_active_writer`** — the JWT writer dependency, built by the
+  single `build_auth_deps()` call alongside the existing authenticated/admin/superuser
+  members. Requires a minimum role of `WRITER`, so `WRITER`/`ADMIN`/`SUPERADMIN` pass
+  and `USER`/`READER` receive the unchanged `403 "The user doesn't have enough
+  privileges"` response.
+- **`audit_api_key_routes(app, bare_dependency=..., exempt_paths=...)`** — walks a
+  built `FastAPI` app's routes and reports any that depend directly on the bare
+  `get_current_api_key_principal` instead of a role-capped dependency
+  (`require_api_key_role(...)`'s output). Depending on the bare dependency alone
+  grants no capability, but a route wired to it directly is a wiring mistake this
+  catches at test time (§3.3.1). Returns `BareApiKeyDependency(path, methods)`
+  findings; an explicit `exempt_paths` allowlist covers intentional read-only
+  routes (e.g. a `/verify`-style endpoint).
+
+### Changed
+
+- **All JWT role guards now authorize through the `auth-sdk-m8` policy helpers.**
+  `get_current_active_writer`/`_admin` delegate the hierarchy to
+  `has_minimum_role()` (replacing the local `RoleType.is_valid_role_auth()` call), so
+  the role ordering exists only in the SDK and the two guards cannot drift.
+
+### Security
+
+- **`get_current_active_writer`/`_admin`/`_superuser` never answer from the positive
+  revocation cache (`REV-CACHE-01`, 3.5.4).** They now resolve the token through a
+  dedicated fresh-only path (`RemoteRevocationClient.is_revoked(..., bypass_cache=True)`)
+  instead of the shared `get_current_user` dependency, so the first role-sensitive
+  request after a revocation commits always observes the new state. The short-TTL
+  positive cache (`REVOCATION_CACHE_TTL_SECONDS`) now serves only the general
+  authenticated tier (`CurrentUser`/`get_current_user`); a bypassed lookup still
+  refreshes the shared cache entry so the general tier benefits from it too.
+- **`get_current_active_superuser` now requires canonical dual evidence.** It delegates
+  to the SDK's `has_superuser_privileges()`, which demands `role == SUPERADMIN` **and**
+  `is_superuser=True` together. Previously the guard checked the `is_superuser` flag and
+  the role in two separate steps; the flag is no longer sufficient evidence on its own at
+  any step. A token whose claims disagree (e.g. `is_superuser=true` with a lower role) is
+  already rejected at validation by the SDK 3.0.0 model invariant — this guard-level check
+  is defense in depth for a principal that reaches the dependency inconsistent.
+- **No role guard consults `is_superuser` for a role threshold.** The writer and admin
+  dependencies are pure role checks, so a stray `is_superuser=true` can never bypass them.
+- **An API key never grants administrative or superuser authority.** No
+  `get_current_api_key_admin`/`_superuser` dependency exists and no setting creates
+  one — `require_api_key_role()` raises `ApiKeyCapabilityCeilingError` at wiring time
+  for any role above `WRITER`. An owner's `ADMIN`/`SUPERADMIN` role grants an API-key
+  request nothing beyond writer-level capability, and `is_superuser` on the principal
+  is evidence about the owner's record, never authority. (Earlier drafts of this work
+  described a remote `_superuser` specialization disabled behind a per-deployment
+  opt-in; it is **removed**, not disabled-by-default.)
+- **The API-key path is fail-closed with no configurable escape.** It never reads
+  `ACCESS_REVOCATION_FAILURE_MODE`, whose `fail_open` value must not exist here: an
+  issuer outage, timeout, open circuit, shed request, oversized/malformed response,
+  unknown schema version, or an audience mismatch always denies with `503`. There is
+  no fallback to a cached principal, a locally stored role, or bare key validity.
+- **No positive principal caching.** Every capability-bearing request introspects the
+  issuer; only HTTP connection pooling is reused. `auth_generation` on the response is
+  evidence for the current decision, never authorization to reuse the principal later.
+- **No post-transmission retries.** Introspection consumes the key's quota, so only a
+  failure known to precede transmission (connection establishment) is retried once. A
+  read timeout or `5xx` is never replayed, since that could double-charge the owner.
+- **The raw key is confined to the outbound payload.** It is a `SecretStr` in every
+  model, and the request body is built explicitly at the transmission point rather
+  than serialized generically (which would send the mask). It never appears in the
+  URL, query, logs, traces, metrics, exception text, or model `repr`. Redirects are
+  disabled so the key cannot be replayed to an unauthenticated host.
+- **Denials carry no owner-state oracle.** An unknown, revoked, or expired key and
+  every missing/inactive/inconsistent-owner cause share the single generic
+  `401 Invalid or expired API key`, identical to the response for no key at all.
 
 ---
 

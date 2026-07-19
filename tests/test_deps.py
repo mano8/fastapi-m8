@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
+from auth_sdk_m8.events import AuthStreamEvent
 from auth_sdk_m8.schemas.base import RoleType
 from auth_sdk_m8.schemas.user import UserModel
 from auth_sdk_m8.security.jwks_resolver import JwksKeyResolver
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from fastapi_m8._deps import _LoggingHooks, build_auth_deps
 from fastapi_m8._revocation import RevocationCheckError
@@ -47,6 +50,7 @@ def test_build_auth_deps_stateless_no_revocation_client() -> None:
     auth = build_auth_deps(make_settings())
     assert auth.revocation_client is None
     assert callable(auth.get_current_user)
+    assert callable(auth.get_current_active_writer)
     assert callable(auth.get_current_active_admin)
     assert callable(auth.get_current_active_superuser)
 
@@ -60,6 +64,56 @@ def test_build_auth_deps_stateful_creates_revocation_client() -> None:
     )
     auth = build_auth_deps(s)
     assert auth.revocation_client is not None
+
+
+# ── single-builder contract: no implicit cache across calls ──────────────────
+
+
+def test_second_build_call_yields_an_independent_revocation_client() -> None:
+    """A second build_auth_deps() call builds its own validator/client — no cache.
+
+    ``build_auth_deps`` is documented as a one-call-per-service factory; a
+    second call must not silently reuse or share state with the first, or two
+    services (or two calls in the same process) would cross-contaminate their
+    revocation caches.
+    """
+    s = make_settings(
+        TOKEN_MODE="stateful",
+        INTROSPECTION_URL="http://auth:8000/private/v1/jti-status",
+        PRIVATE_API_SECRET="supersecret",
+    )
+    first = build_auth_deps(s)
+    second = build_auth_deps(s)
+    assert first.revocation_client is not None
+    assert second.revocation_client is not None
+    assert first.revocation_client is not second.revocation_client
+    assert first is not second
+
+
+def test_second_build_call_yields_an_independent_api_key_client() -> None:
+    """A second build_auth_deps() call builds its own API-key client too."""
+    s = make_settings(
+        API_KEY_INTROSPECTION_ENABLED=True,
+        INTERNAL_CLIENT_ID="consumer-a",
+        PRIVATE_API_SECRET="supersecret",
+        INTROSPECTION_URL="http://auth:8000/user/private/v1/jti-status",
+    )
+    first = build_auth_deps(s)
+    second = build_auth_deps(s)
+    assert first.api_key_client is not None
+    assert second.api_key_client is not None
+    assert first.api_key_client is not second.api_key_client
+    assert (
+        first.get_current_api_key_principal is not second.get_current_api_key_principal
+    )
+
+
+def test_second_build_call_yields_independent_jwt_guard_closures() -> None:
+    """The JWT guards themselves are fresh closures each call, not memoized."""
+    auth1 = build_auth_deps(make_settings())
+    auth2 = build_auth_deps(make_settings())
+    assert auth1.get_current_user is not auth2.get_current_user
+    assert auth1.get_current_active_writer is not auth2.get_current_active_writer
 
 
 # ── AuthDeps.close ────────────────────────────────────────────────────────────
@@ -305,12 +359,15 @@ async def test_fail_open_introspection_down_accepts_token() -> None:
     await auth.close()
 
 
-# ── get_current_active_admin ──────────────────────────────────────────────────
+# ── role guards: the §3.3 canonical matrix ────────────────────────────────────
 
 
-def _make_user(role: RoleType, is_superuser: bool = False) -> UserModel:
+def _make_user(role: RoleType, is_superuser: bool | None = None) -> UserModel:
+    """Build a canonical user; is_superuser is derived unless given explicitly."""
     import uuid
 
+    if is_superuser is None:
+        is_superuser = role is RoleType.SUPERADMIN
     return UserModel(
         id=uuid.UUID(_VALID_UUID),
         email="user@example.com",
@@ -320,59 +377,119 @@ def _make_user(role: RoleType, is_superuser: bool = False) -> UserModel:
     )
 
 
-def test_get_current_active_admin_passes_for_admin() -> None:
-    """ADMIN role passes the admin guard."""
+def _make_inconsistent_user(role: RoleType, is_superuser: bool) -> UserModel:
+    """Build a user whose claims violate the canonical invariant.
+
+    auth-sdk-m8 3.0.0 rejects such a pair in ``UserModel`` itself, so the pair
+    must be forced past validation to prove the guards deny it on their own
+    (defense in depth) rather than relying on the model invariant.
+    """
+    import uuid
+
+    return UserModel.model_construct(
+        id=uuid.UUID(_VALID_UUID),
+        email="user@example.com",
+        is_active=True,
+        role=role,
+        is_superuser=is_superuser,
+    )
+
+
+# role → (writer allowed, admin allowed, superuser allowed) — §3.3 truth table.
+_ROLE_MATRIX = [
+    (RoleType.USER, False, False, False),
+    (RoleType.READER, False, False, False),
+    (RoleType.WRITER, True, False, False),
+    (RoleType.ADMIN, True, True, False),
+    (RoleType.SUPERADMIN, True, True, True),
+]
+
+
+def _assert_guard(guard, user: UserModel, allowed: bool) -> None:
+    """Assert *guard* either returns *user* unchanged or denies with a 403."""
+    if allowed:
+        assert guard(user) is user
+        return
+    with pytest.raises(HTTPException) as exc_info:
+        guard(user)
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "The user doesn't have enough privileges"
+
+
+@pytest.mark.parametrize("role,writer_ok,admin_ok,su_ok", _ROLE_MATRIX)
+def test_role_matrix_writer_dependency(
+    role: RoleType, writer_ok: bool, admin_ok: bool, su_ok: bool
+) -> None:
+    """Every canonical role gets the §3.3 writer-dependency outcome."""
     auth = build_auth_deps(make_settings())
-    admin = _make_user(RoleType.ADMIN)
-    result = auth.get_current_active_admin(admin)
-    assert result is admin
+    _assert_guard(auth.get_current_active_writer, _make_user(role), writer_ok)
 
 
-def test_get_current_active_admin_raises_for_regular_user() -> None:
-    """Non-admin role raises 403."""
+@pytest.mark.parametrize("role,writer_ok,admin_ok,su_ok", _ROLE_MATRIX)
+def test_role_matrix_admin_dependency(
+    role: RoleType, writer_ok: bool, admin_ok: bool, su_ok: bool
+) -> None:
+    """Every canonical role gets the §3.3 admin-dependency outcome."""
+    auth = build_auth_deps(make_settings())
+    _assert_guard(auth.get_current_active_admin, _make_user(role), admin_ok)
+
+
+@pytest.mark.parametrize("role,writer_ok,admin_ok,su_ok", _ROLE_MATRIX)
+def test_role_matrix_superuser_dependency(
+    role: RoleType, writer_ok: bool, admin_ok: bool, su_ok: bool
+) -> None:
+    """Every canonical role gets the §3.3 superuser-dependency outcome."""
+    auth = build_auth_deps(make_settings())
+    _assert_guard(auth.get_current_active_superuser, _make_user(role), su_ok)
+
+
+# ── no privilege escalation through the is_superuser flag ─────────────────────
+
+
+@pytest.mark.parametrize("role", [RoleType.USER, RoleType.READER])
+def test_superuser_flag_never_bypasses_writer_guard(role: RoleType) -> None:
+    """is_superuser=True on a sub-writer role still fails the writer guard."""
     auth = build_auth_deps(make_settings())
     with pytest.raises(HTTPException) as exc_info:
-        auth.get_current_active_admin(_make_user(RoleType.USER))
+        auth.get_current_active_writer(_make_inconsistent_user(role, True))
     assert exc_info.value.status_code == 403
 
 
-# ── get_current_active_superuser ──────────────────────────────────────────────
-
-
-def test_get_current_active_superuser_passes_for_superuser() -> None:
-    """SUPERADMIN passes the superuser guard."""
-    auth = build_auth_deps(make_settings())
-    su = _make_user(RoleType.SUPERADMIN, is_superuser=True)
-    result = auth.get_current_active_superuser(su)
-    assert result is su
-
-
-def test_get_current_active_superuser_raises_for_admin() -> None:
-    """ADMIN (is_superuser=False) raises 403."""
+@pytest.mark.parametrize("role", [RoleType.USER, RoleType.READER, RoleType.WRITER])
+def test_superuser_flag_never_bypasses_admin_guard(role: RoleType) -> None:
+    """is_superuser=True on a sub-admin role still fails the admin guard."""
     auth = build_auth_deps(make_settings())
     with pytest.raises(HTTPException) as exc_info:
-        auth.get_current_active_superuser(_make_user(RoleType.ADMIN))
+        auth.get_current_active_admin(_make_inconsistent_user(role, True))
     assert exc_info.value.status_code == 403
 
 
-def test_get_current_active_superuser_raises_for_non_superuser_flag() -> None:
-    """SUPERADMIN role but is_superuser=False raises 403."""
+@pytest.mark.parametrize(
+    "role", [RoleType.USER, RoleType.READER, RoleType.WRITER, RoleType.ADMIN]
+)
+def test_superuser_flag_never_bypasses_superuser_guard(role: RoleType) -> None:
+    """is_superuser=True without the SUPERADMIN role is never superuser."""
+    auth = build_auth_deps(make_settings())
+    with pytest.raises(HTTPException) as exc_info:
+        auth.get_current_active_superuser(_make_inconsistent_user(role, True))
+    assert exc_info.value.status_code == 403
+
+
+def test_superuser_role_without_flag_denied() -> None:
+    """SUPERADMIN role with is_superuser=False lacks the dual evidence → 403."""
     auth = build_auth_deps(make_settings())
     with pytest.raises(HTTPException) as exc_info:
         auth.get_current_active_superuser(
-            _make_user(RoleType.SUPERADMIN, is_superuser=False)
+            _make_inconsistent_user(RoleType.SUPERADMIN, False)
         )
     assert exc_info.value.status_code == 403
 
 
-def test_get_current_active_superuser_raises_for_superuser_flag_with_insufficient_role() -> (
-    None
-):
-    """is_superuser=True but ADMIN role fails the SUPERADMIN role check."""
+def test_superuser_role_without_flag_still_passes_admin_guard() -> None:
+    """The admin guard is a pure role check: the flag neither grants nor blocks."""
     auth = build_auth_deps(make_settings())
-    with pytest.raises(HTTPException) as exc_info:
-        auth.get_current_active_superuser(_make_user(RoleType.ADMIN, is_superuser=True))
-    assert exc_info.value.status_code == 403
+    user = _make_inconsistent_user(RoleType.SUPERADMIN, False)
+    assert auth.get_current_active_admin(user) is user
 
 
 # ── AuthDeps cache eviction helpers ──────────────────────────────────────────
@@ -386,6 +503,112 @@ def _stateful_auth(**overrides):  # type: ignore[return]
         **overrides,
     )
     return build_auth_deps(s)
+
+
+# ── REV-CACHE-01: role-sensitive dependencies bypass the positive cache ──────
+
+
+def _active_jti_status(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "active": True,
+            "user_id": _VALID_UUID,
+            "auth_generation": 1,
+            "schema_version": "2",
+        },
+    )
+
+
+def _route_client(auth, dependency) -> TestClient:
+    app = FastAPI()
+
+    @app.get("/thing")
+    def route(user=Depends(dependency)) -> dict:  # noqa: ANN001
+        return {"role": user.role.value}
+
+    return TestClient(app)
+
+
+def test_writer_dependency_never_answers_from_the_cache() -> None:
+    """Two writer-guarded requests for the same JTI both hit the issuer.
+
+    ``REV-CACHE-01`` (3.5.4): the short-TTL positive cache serves only the
+    general authenticated tier. A role-sensitive dependency must observe the
+    new authorization state on its very first request after a revocation
+    commits, so it may never be satisfied from a cached prior answer — even
+    one it just populated itself.
+    """
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    client = _route_client(auth, auth.get_current_active_writer)
+    token = make_access_token(role="writer")
+
+    for _ in range(2):
+        response = client.get("/thing", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+    assert len(calls) == 2, "a role-sensitive request must never be a cache hit"
+
+
+def test_general_authenticated_tier_reuses_the_cache() -> None:
+    """The plain authenticated dependency may still answer from the cache."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    client = _route_client(auth, auth.get_current_user)
+    token = make_access_token(role="writer")
+
+    for _ in range(2):
+        response = client.get("/thing", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+    assert len(calls) == 1, "the general tier should reuse the positive cache entry"
+
+
+def test_writer_dependency_still_populates_the_cache_for_the_general_tier() -> None:
+    """A bypassed (role-sensitive) lookup still refreshes the shared cache entry."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    token = make_access_token(role="writer")
+
+    writer_client = _route_client(auth, auth.get_current_active_writer)
+    assert (
+        writer_client.get(
+            "/thing", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
+    assert len(calls) == 1
+
+    general_client = _route_client(auth, auth.get_current_user)
+    assert (
+        general_client.get(
+            "/thing", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
+    assert len(calls) == 1, (
+        "the general tier should reuse the entry the writer path put"
+    )
 
 
 def test_evict_jti_noop_without_revocation_client() -> None:
@@ -411,7 +634,7 @@ def test_evict_jti_delegates_when_cache_enabled() -> None:
     auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
     assert auth.revocation_client is not None
     assert auth.revocation_client._cache is not None
-    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.revocation_client._cache.put("jti-1", "user-a", 1)
     auth.evict_jti("jti-1")
     assert auth.revocation_client._cache.get("jti-1") is None
 
@@ -421,7 +644,7 @@ def test_evict_user_delegates_when_cache_enabled() -> None:
     auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
     assert auth.revocation_client is not None
     assert auth.revocation_client._cache is not None
-    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.revocation_client._cache.put("jti-1", "user-a", 1)
     auth.evict_user("user-a")
     assert auth.revocation_client._cache.get("jti-1") is None
 
@@ -431,9 +654,92 @@ def test_flush_cache_delegates_when_cache_enabled() -> None:
     auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
     assert auth.revocation_client is not None
     assert auth.revocation_client._cache is not None
-    auth.revocation_client._cache.put("jti-1", "user-a")
+    auth.revocation_client._cache.put("jti-1", "user-a", 1)
     auth.flush_cache()
     assert auth.revocation_client._cache.get("jti-1") is None
+
+
+def _event(event_type: str, payload: dict) -> AuthStreamEvent:
+    return AuthStreamEvent(event_type=event_type, payload=payload, event_id="7-1")
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_applies_session_revoked() -> None:
+    """The SSE handler routes session-revoked into the watermark rule."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 1)
+    await auth.handle_auth_event(
+        _event(
+            "session-revoked",
+            {
+                "event_type": "session.revoked",
+                "user_id": "user-a",
+                "jti": "jti-1",
+                "auth_generation": 2,
+                "event_id": "evt-1",
+            },
+        )
+    )
+    assert cache.get("jti-1") is None
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_applies_user_deleted() -> None:
+    """user-deleted evicts every entry the deleted account still holds."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 9)
+    await auth.handle_auth_event(
+        _event("user-deleted", {"event_type": "user.deleted", "user_id": "user-a"})
+    )
+    assert cache.get("jti-1") is None
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_accepts_the_dotted_spelling() -> None:
+    """The payload's canonical dot spelling routes identically to the SSE one."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 9)
+    await auth.handle_auth_event(
+        _event("user.deleted", {"event_type": "user.deleted", "user_id": "user-a"})
+    )
+    assert cache.get("jti-1") is None
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_ignores_unknown_type() -> None:
+    """An event type this release does not act on is dropped, never raised on."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    await auth.handle_auth_event(_event("something-else", {"user_id": "user-a"}))
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_ignores_user_deleted_without_a_user() -> None:
+    """A user-deleted payload with no usable user id evicts nothing."""
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    cache = auth.revocation_client._cache
+    assert cache is not None
+    cache.put("jti-1", "user-a", 1)
+    await auth.handle_auth_event(_event("user-deleted", {"event_type": "user.deleted"}))
+    assert cache.get("jti-1") is False
+
+
+@pytest.mark.anyio
+async def test_handle_auth_event_noop_in_stateless_mode() -> None:
+    """With no revocation client there is no cache to evict from."""
+    auth = build_auth_deps(make_settings())
+    await auth.handle_auth_event(
+        _event("session-revoked", {"event_type": "session.revoked", "user_id": "u"})
+    )
 
 
 def test_revocation_cache_disabled_by_default() -> None:

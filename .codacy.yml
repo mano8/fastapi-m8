@@ -27,3 +27,5 @@ exclude_paths:
   # Codacy's prose analyzer misclassifies a security policy doc (flags standard
   # security acronyms such as CA/TTL/JTI as "undefined" on every revision).
   - "SECURITY.md"
+  - "AGENTS.md"
+  - "CLAUDE.md"
