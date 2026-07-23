@@ -179,6 +179,14 @@ class AuthDeps:
         Dependency function — returns the authenticated user.
     CurrentUser
         ``Annotated[UserModel, Depends(get_current_user)]``.
+    require_role
+        Factory building a JWT role-threshold dependency for any
+        ``RoleType`` (mirrors ``require_api_key_role``), authorized solely
+        through ``has_minimum_role`` on the fresh, no-positive-cache user
+        path. ``get_current_active_reader``/``_writer``/``_admin`` are built
+        from it.
+    get_current_active_reader
+        Dependency that additionally requires at least READER role.
     get_current_active_writer
         Dependency that additionally requires at least WRITER role.
     get_current_active_admin
@@ -203,15 +211,15 @@ class AuthDeps:
     the role hierarchy and the canonical-superuser predicate are never
     reimplemented here:
 
-    ==================  =====  ======  ======  ==========
-    Role                auth   writer  admin   superuser
-    ==================  =====  ======  ======  ==========
-    USER                allow  403     403     403
-    READER              allow  403     403     403
-    WRITER              allow  allow   403     403
-    ADMIN               allow  allow   allow   403
-    SUPERADMIN          allow  allow   allow   allow
-    ==================  =====  ======  ======  ==========
+    ==================  =====  ======  ======  ======  ==========
+    Role                auth   reader  writer  admin   superuser
+    ==================  =====  ======  ======  ======  ==========
+    USER                allow  403     403     403     403
+    READER              allow  allow   403     403     403
+    WRITER              allow  allow   allow   403     403
+    ADMIN               allow  allow   allow   allow   403
+    SUPERADMIN          allow  allow   allow   allow   allow
+    ==================  =====  ======  ======  ======  ==========
 
     The API-key members mirror that table only up to ``WRITER``, and they are
     additionally capped by the key's immutable access mode. There is no API-key
@@ -228,6 +236,8 @@ class AuthDeps:
 
     get_current_user: Callable
     CurrentUser: Any
+    require_role: Callable
+    get_current_active_reader: Callable
     get_current_active_writer: Callable
     get_current_active_admin: Callable
     get_current_active_superuser: Callable
@@ -374,19 +384,37 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
         """
         return await _authenticate(token, bypass_cache=True)
 
-    def get_current_active_writer(
-        current_user: UserModel = Depends(_get_current_user_fresh),
-    ) -> UserModel:
-        """Verify at least WRITER role."""
-        _require_role(current_user, RoleType.WRITER)
-        return current_user
+    def require_role(required_role: RoleType) -> Callable:
+        """
+        Build a dependency requiring *required_role* of the JWT-authenticated user.
 
-    def get_current_active_admin(
-        current_user: UserModel = Depends(_get_current_user_fresh),
-    ) -> UserModel:
-        """Verify at least ADMIN role."""
-        _require_role(current_user, RoleType.ADMIN)
-        return current_user
+        Mirrors ``require_api_key_role``, but for the JWT family: authorized
+        solely through ``has_minimum_role`` on the fresh, no-positive-cache
+        user path (``_get_current_user_fresh``), so a role-sensitive
+        dependency always observes state committed after the last
+        revocation. ``is_superuser`` is never consulted for a role
+        threshold, so the flag alone can never bypass a role dependency.
+
+        Args:
+            required_role: The minimum role the operation needs.
+
+        Returns:
+            A FastAPI dependency returning the current user, or denying with
+            403.
+
+        """
+
+        def _dependency(
+            current_user: UserModel = Depends(_get_current_user_fresh),
+        ) -> UserModel:
+            _require_role(current_user, required_role)
+            return current_user
+
+        return _dependency
+
+    get_current_active_reader = require_role(RoleType.READER)
+    get_current_active_writer = require_role(RoleType.WRITER)
+    get_current_active_admin = require_role(RoleType.ADMIN)
 
     def get_current_active_superuser(
         current_user: UserModel = Depends(_get_current_user_fresh),
@@ -407,6 +435,8 @@ def build_auth_deps(settings: "ConsumerServiceSettings") -> AuthDeps:
     return AuthDeps(
         get_current_user=get_current_user,
         CurrentUser=CurrentUser,
+        require_role=require_role,
+        get_current_active_reader=get_current_active_reader,
         get_current_active_writer=get_current_active_writer,
         get_current_active_admin=get_current_active_admin,
         get_current_active_superuser=get_current_active_superuser,
