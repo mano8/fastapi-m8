@@ -98,6 +98,13 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # fixtures, via auth_sdk_m8.testing.load_authorization_fixture_matrix() —
     # see tests/test_fixture_matrix_contract.py and CHANGELOG.
     "4.1": {"auth-sdk-m8": ">=3.1.0,<4.0.0"},
+    # 4.2 (MINOR) adds the centralized require_role(required_role: RoleType)
+    # JWT dependency factory to AuthDeps, authorized through has_minimum_role
+    # on the fresh user path; exposes get_current_active_reader (≥READER) and
+    # re-expresses writer/admin guards through the same factory without behavior
+    # change. The SDK floor remains >=3.1.0,<4.0.0 (no new SDK API required).
+    # See CHANGELOG and Phase 7 (role-gated examples and privileged-action audit).
+    "4.2": {"auth-sdk-m8": ">=3.1.0,<4.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
