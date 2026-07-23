@@ -91,6 +91,13 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # 2.x SDK, or the strict claim-consistency rejection and the API-key
     # principal contract would silently not run. See CHANGELOG.
     "4.0": {"auth-sdk-m8": ">=3.0.0,<4.0.0"},
+    # 4.1 (MINOR) consumes the SDK's expanded canonical fixture matrix
+    # (auth-sdk-m8 3.1.0, schema_version "2" of authorization_matrix.json):
+    # JTI-status v1/v2, API-key introspection shapes + status matrix,
+    # local/remote principal equivalence, and audience/capability-policy
+    # fixtures, via auth_sdk_m8.testing.load_authorization_fixture_matrix() —
+    # see tests/test_fixture_matrix_contract.py and CHANGELOG.
+    "4.1": {"auth-sdk-m8": ">=3.1.0,<4.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
