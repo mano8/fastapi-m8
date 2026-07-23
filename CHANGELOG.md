@@ -5,6 +5,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [4.1.0] — 2026-07-23 · Consume the SDK canonical fixture matrix (Phase 5, FIXTURE-01)
+
+Raises the `auth-sdk-m8` floor to `>=3.1.0,<4.0.0` (new `_compat` `"4.1"` row)
+to consume the expanded, checksummed `authorization_matrix.json` (schema
+version `"2"`) from `auth_sdk_m8.testing.load_authorization_fixture_matrix()`.
+`tests/test_fixture_matrix_contract.py` drives fastapi-m8's own guard/parsing
+code directly from the canonical fixture data instead of locally invented
+expectations:
+
+- `_require_role`/`has_superuser_privileges` parity against the fixture's
+  role-flag and minimum-role matrices.
+- `RemoteRevocationClient._parse` against the JTI-status v1/v2 fixtures
+  (including the subject-mismatch and unsupported-schema-version cases).
+- `ApiKeyIntrospectionClient._parse`/`_interpret` against the API-key
+  introspection active/inactive/unsupported-schema-version fixtures and the
+  audience-mismatch fail-closed case.
+- Local-vs-remote `ApiKeyPrincipal` equivalence and the audience/
+  capability-policy decision table against `has_api_key_capability`.
+
+Because the loader itself raises on a checksum mismatch or an unsupported
+schema version, importing/calling it in this suite is already part of the CI
+gate against contract drift — a hand-edited or partially regenerated SDK
+fixture fails this repository's tests too, not only the SDK's own.
+
+No behavior change outside the test suite; no API surface change.
+
+---
+
 ## [4.0.0] — 2026-07-17 · auth-sdk-m8 3.0.0 alignment — canonical role/flag invariant + JTI-status v2 + remote API-key principal
 
 > **MAJOR — coordinated release with `auth-sdk-m8 3.0.0`.** `fastapi-m8` raises the SDK
