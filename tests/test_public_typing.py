@@ -60,12 +60,30 @@ from fastapi_m8 import (
     derive_stream_url,
 )
 from auth_sdk_m8.schemas.api_key import ApiKeyPrincipal
+from auth_sdk_m8.schemas.base import RoleType
 from auth_sdk_m8.schemas.user import UserModel
 
 
 def build(settings: ConsumerServiceSettings) -> AuthDeps:
     """build_auth_deps returns the documented AuthDeps type, not Any."""
     return build_auth_deps(settings)
+
+
+def use_reader_guard(auth: AuthDeps, app: FastAPI) -> None:
+    """The JWT reader dependency resolves to a typed UserModel (Phase 7)."""
+
+    @app.get("/reader-thing")
+    def route(user: UserModel = Depends(auth.get_current_active_reader)) -> dict:
+        return {"role": user.role.value}
+
+
+def use_require_role_factory(auth: AuthDeps, app: FastAPI) -> None:
+    """require_role is typed as a factory returning a UserModel dependency."""
+    dependency = auth.require_role(RoleType.READER)
+
+    @app.get("/factory-thing")
+    def route(user: UserModel = Depends(dependency)) -> dict:
+        return {"role": user.role.value}
 
 
 def use_writer_guard(auth: AuthDeps, app: FastAPI) -> None:
