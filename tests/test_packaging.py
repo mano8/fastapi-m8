@@ -141,6 +141,12 @@ settings = fm8.ConsumerServiceSettings(
 auth = fm8.build_auth_deps(settings)
 assert auth.get_current_api_key_principal is not None
 
+from auth_sdk_m8.schemas.base import RoleType
+
+assert callable(auth.get_current_active_reader)
+assert callable(auth.require_role)
+assert auth.require_role(RoleType.READER) is not auth.get_current_active_reader
+
 app = FastAPI()
 
 @app.get("/bare-thing")

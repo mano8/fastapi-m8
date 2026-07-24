@@ -5,6 +5,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [4.2.0] — 2026-07-23 · Role-capability demonstration surface (Phase 7)
+
+Adds a centralized `require_role(required_role: RoleType)` JWT dependency
+factory to `AuthDeps`, authorized through `has_minimum_role` on the fresh user
+path; exposes `get_current_active_reader` (≥READER) for READER-tier route
+protection and re-expresses existing writer/admin/superuser guards through the
+same factory without behavior change. Supports Phase 7's role-gated example
+applications and privileged-action audit trails — no SDK API changes required.
+
+### Added
+
+- **`AuthDeps.get_current_active_reader`** — the JWT reader dependency, built by
+  the single `build_auth_deps()` call alongside the existing authenticated/
+  writer/admin/superuser members. Requires a minimum role of `READER`, so
+  `READER`/`WRITER`/`ADMIN`/`SUPERADMIN` pass; `USER` is denied with `403`.
+- **`AuthDeps.require_role(required_role: RoleType)` dependency factory** —
+  centralized guard accepting any `RoleType` threshold, authorized through
+  `has_minimum_role`, running on the fresh user path (no positive revocation
+  cache); the existing writer/admin/superuser dependencies now delegate to it
+  internally.
+
+### Changed
+
+- `AuthDeps.get_current_active_writer`, `_admin`, and `_superuser` now
+  implement their role thresholds through `require_role()`, preserving all
+  behavior and error semantics — no observable change for consumers.
+
+### Documentation
+
+- Updated README role table and compatibility table to reflect the new
+  `get_current_active_reader` capability and the `4.2.0` entry.
+
+---
+
 ## [4.1.0] — 2026-07-23 · Consume the SDK canonical fixture matrix (Phase 5, FIXTURE-01)
 
 Raises the `auth-sdk-m8` floor to `>=3.1.0,<4.0.0` (new `_compat` `"4.1"` row)
@@ -673,11 +707,18 @@ CONTENT_SECURITY_POLICY_ENABLED=true
 
   ```python
   # Before (1.0.x README — never worked)
-  app = create_app(settings, router, auth_deps=auth, db_engine=engine, health_checks=[check])
+  app = create_app(
+      settings, router, auth_deps=auth, db_engine=engine, health_checks=[check]
+  )
   # After (1.1.x — matches the code)
   from fastapi_m8 import AppLifecycle, HealthConfig
-  app = create_app(settings, router, health=HealthConfig(checks=[check]),
-                   lifecycle=AppLifecycle(auth_deps=auth, db_engine=engine))
+
+  app = create_app(
+      settings,
+      router,
+      health=HealthConfig(checks=[check]),
+      lifecycle=AppLifecycle(auth_deps=auth, db_engine=engine),
+  )
   ```
 
 - `auth-sdk-m8` pin → `>=0.7.1,<0.8.0` (lazy-redis + revocation default fix).

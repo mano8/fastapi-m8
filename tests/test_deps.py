@@ -404,6 +404,17 @@ _ROLE_MATRIX = [
     (RoleType.SUPERADMIN, True, True, True),
 ]
 
+# role → reader allowed — §3.3.1 truth table. READER is the lowest threshold
+# above plain authentication, so it gets its own two-outcome matrix rather than
+# an extra column on _ROLE_MATRIX above.
+_READER_MATRIX = [
+    (RoleType.USER, False),
+    (RoleType.READER, True),
+    (RoleType.WRITER, True),
+    (RoleType.ADMIN, True),
+    (RoleType.SUPERADMIN, True),
+]
+
 
 def _assert_guard(guard, user: UserModel, allowed: bool) -> None:
     """Assert *guard* either returns *user* unchanged or denies with a 403."""
@@ -414,6 +425,13 @@ def _assert_guard(guard, user: UserModel, allowed: bool) -> None:
         guard(user)
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "The user doesn't have enough privileges"
+
+
+@pytest.mark.parametrize("role,reader_ok", _READER_MATRIX)
+def test_role_matrix_reader_dependency(role: RoleType, reader_ok: bool) -> None:
+    """Every canonical role gets the §3.3.1 reader-dependency outcome."""
+    auth = build_auth_deps(make_settings())
+    _assert_guard(auth.get_current_active_reader, _make_user(role), reader_ok)
 
 
 @pytest.mark.parametrize("role,writer_ok,admin_ok,su_ok", _ROLE_MATRIX)
@@ -444,6 +462,19 @@ def test_role_matrix_superuser_dependency(
 
 
 # ── no privilege escalation through the is_superuser flag ─────────────────────
+
+
+def test_superuser_flag_never_bypasses_reader_guard() -> None:
+    """is_superuser=True on a USER role still fails the reader guard.
+
+    READER is the lowest role threshold, so USER is the only role below it —
+    unlike the writer/admin/superuser bypass tests below, there is nothing to
+    parametrize over.
+    """
+    auth = build_auth_deps(make_settings())
+    with pytest.raises(HTTPException) as exc_info:
+        auth.get_current_active_reader(_make_inconsistent_user(RoleType.USER, True))
+    assert exc_info.value.status_code == 403
 
 
 @pytest.mark.parametrize("role", [RoleType.USER, RoleType.READER])
@@ -492,6 +523,46 @@ def test_superuser_role_without_flag_still_passes_admin_guard() -> None:
     assert auth.get_current_active_admin(user) is user
 
 
+# ── require_role factory: the generic building block (Phase 7) ───────────────
+
+
+def test_require_role_reader_matches_the_prebuilt_guard() -> None:
+    """require_role(READER) behaves identically to get_current_active_reader.
+
+    get_current_active_reader is built from require_role(RoleType.READER); this
+    proves the factory itself — not just the three prebuilt attributes — carries
+    the same allow/deny behavior.
+    """
+    auth = build_auth_deps(make_settings())
+    dependency = auth.require_role(RoleType.READER)
+    user = _make_user(RoleType.READER)
+    assert dependency(user) is user
+    with pytest.raises(HTTPException) as exc_info:
+        dependency(_make_user(RoleType.USER))
+    assert exc_info.value.status_code == 403
+
+
+def test_require_role_never_consults_is_superuser() -> None:
+    """A dependency built directly from require_role also ignores is_superuser.
+
+    Mirrors the prebuilt-guard bypass tests above, but through the raw factory,
+    so a future require_role(...) call site cannot reintroduce a flag-only path.
+    """
+    auth = build_auth_deps(make_settings())
+    dependency = auth.require_role(RoleType.WRITER)
+    with pytest.raises(HTTPException) as exc_info:
+        dependency(_make_inconsistent_user(RoleType.READER, True))
+    assert exc_info.value.status_code == 403
+
+
+def test_require_role_builds_independent_closures() -> None:
+    """Two require_role calls for the same role return distinct dependencies."""
+    auth = build_auth_deps(make_settings())
+    first = auth.require_role(RoleType.READER)
+    second = auth.require_role(RoleType.READER)
+    assert first is not second
+
+
 # ── AuthDeps cache eviction helpers ──────────────────────────────────────────
 
 
@@ -528,6 +599,57 @@ def _route_client(auth, dependency) -> TestClient:
         return {"role": user.role.value}
 
     return TestClient(app)
+
+
+def test_reader_dependency_never_answers_from_the_cache() -> None:
+    """The reader guard also bypasses the positive cache (REV-CACHE-01).
+
+    Same property the writer/admin/superuser guards already prove below, now
+    asserted for the lowest role-sensitive tier so a downgrade below READER is
+    observed on the very next request too.
+    """
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    client = _route_client(auth, auth.get_current_active_reader)
+    token = make_access_token(role="reader")
+
+    for _ in range(2):
+        response = client.get("/thing", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+    assert len(calls) == 2, "a role-sensitive request must never be a cache hit"
+
+
+def test_require_role_dependency_never_answers_from_the_cache() -> None:
+    """A dependency built directly via require_role also bypasses the cache.
+
+    The prebuilt attributes below (get_current_active_writer, etc.) already
+    prove this once each; this proves the property belongs to the factory
+    itself, so every future require_role(...) call site inherits it for free.
+    """
+    auth = _stateful_auth(REVOCATION_CACHE_TTL_SECONDS=30)
+    assert auth.revocation_client is not None
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return _active_jti_status(request)
+
+    auth.revocation_client._client._transport = httpx.MockTransport(handler)
+    dependency = auth.require_role(RoleType.ADMIN)
+    client = _route_client(auth, dependency)
+    token = make_access_token(role="admin")
+
+    for _ in range(2):
+        response = client.get("/thing", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200
+    assert len(calls) == 2, "a require_role-built dependency must never be a cache hit"
 
 
 def test_writer_dependency_never_answers_from_the_cache() -> None:

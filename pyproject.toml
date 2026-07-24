@@ -4,18 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fastapi-m8"
-version = "4.1.0"
+version = "4.2.0"
 description = "FastAPI application framework for m8 consumer microservices."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Eli Serra", email = "e.serra173@gmail.com" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 keywords = ["fastapi", "auth", "microservices", "health", "jwt"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Framework :: FastAPI",
@@ -75,7 +74,7 @@ known-first-party = ["fastapi_m8"]
 
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 strict = false
 
