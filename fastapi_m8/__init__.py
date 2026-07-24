@@ -40,6 +40,16 @@ Tier 3 — informational / future::
 """
 
 # Tier 1
+# Reusable SDK primitives — re-exported so consumers only need fastapi-m8,
+# never a direct auth-sdk-m8 dependency.
+from auth_sdk_m8 import has_superuser_privileges
+from auth_sdk_m8.controllers.base import BaseController
+from auth_sdk_m8.models.shared import TimestampMixin
+from auth_sdk_m8.observability.metrics import render as render_metrics
+from auth_sdk_m8.schemas.base import ResponseMessage, ResponseModelBase
+from auth_sdk_m8.schemas.user import UserModel
+from auth_sdk_m8.utils.paths import find_dotenv
+
 from fastapi_m8._api_key import (
     ApiKeyIntrospectionError,
     ApiKeyQuotaExceededError,
@@ -52,16 +62,6 @@ from fastapi_m8._async_stub import CAPABILITIES, capabilities, create_async_app
 from fastapi_m8._compat import COMPAT_MATRIX
 from fastapi_m8._deps import API_KEY_HEADER, AuthDeps, build_auth_deps
 from fastapi_m8._engine import DbEngine, create_db_engine
-
-# Reusable SDK primitives — re-exported so consumers only need fastapi-m8,
-# never a direct auth-sdk-m8 dependency.
-from auth_sdk_m8 import has_superuser_privileges
-from auth_sdk_m8.controllers.base import BaseController
-from auth_sdk_m8.models.shared import TimestampMixin
-from auth_sdk_m8.observability.metrics import render as render_metrics
-from auth_sdk_m8.schemas.base import ResponseMessage, ResponseModelBase
-from auth_sdk_m8.schemas.user import UserModel
-from auth_sdk_m8.utils.paths import find_dotenv
 
 # Tier 1 — auth event stream
 from fastapi_m8._events import (
