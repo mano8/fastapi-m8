@@ -144,11 +144,13 @@ from pathlib import Path
 from pydantic_settings import SettingsConfigDict
 from fastapi_m8 import ConsumerServiceSettings
 
+
 class Settings(ConsumerServiceSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
     )
+
 
 settings = Settings()
 ```
@@ -176,6 +178,7 @@ from app.core.deps import auth, engine
 router = APIRouter(prefix="/items", tags=["items"])
 SessionDep = Annotated[Session, Depends(engine.session_dep)]
 
+
 @router.get("/")
 async def list_items(user: auth.CurrentUser, session: SessionDep):
     return {"owner": user.email}
@@ -187,12 +190,17 @@ async def list_items(user: auth.CurrentUser, session: SessionDep):
 # app/main.py
 from fastapi import APIRouter
 from fastapi_m8 import (
-    AppLifecycle, HealthConfig, create_app, HealthCheckResult, HealthStatus,
+    AppLifecycle,
+    HealthConfig,
+    create_app,
+    HealthCheckResult,
+    HealthStatus,
 )
 from sqlmodel import select
 from app.core.config import settings
 from app.core.deps import auth, engine
 from app.api.items import router as items_router
+
 
 async def check_db() -> HealthCheckResult:
     try:
@@ -200,7 +208,10 @@ async def check_db() -> HealthCheckResult:
             s.exec(select(1))
         return HealthCheckResult.from_bool("database", True)
     except Exception as exc:
-        return HealthCheckResult(name="database", status=HealthStatus.FAIL, error=str(exc))
+        return HealthCheckResult(
+            name="database", status=HealthStatus.FAIL, error=str(exc)
+        )
+
 
 api_router = APIRouter()
 api_router.include_router(items_router)
@@ -739,15 +750,17 @@ Base settings class. Subclass it and configure `model_config` for your `.env` fi
 from pydantic_settings import SettingsConfigDict
 from fastapi_m8 import ConsumerServiceSettings
 
+
 class Settings(ConsumerServiceSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
 
 settings = Settings()
 
 # Useful computed properties (inherited from auth-sdk-m8)
-settings.is_stateless        # bool
-settings.is_stateful         # bool
-settings.ALLOWED_ORIGINS     # list[str] — derived from BACKEND_CORS_ORIGINS
+settings.is_stateless  # bool
+settings.is_stateful  # bool
+settings.ALLOWED_ORIGINS  # list[str] — derived from BACKEND_CORS_ORIGINS
 settings.SQLALCHEMY_DATABASE_URI  # str — assembled from DB_* fields
 ```
 
@@ -818,6 +831,7 @@ from sqlmodel import Session
 
 SessionDep = Annotated[Session, Depends(engine.session_dep)]
 
+
 @router.post("/items")
 async def create_item(session: SessionDep, item: ItemCreate):
     session.add(Item.model_validate(item))
@@ -833,6 +847,7 @@ Implement the `HealthCheck` protocol — any async callable returning `HealthChe
 ```python
 from fastapi_m8 import HealthCheck, HealthCheckResult, HealthStatus
 
+
 # Function-based
 async def check_database() -> HealthCheckResult:
     try:
@@ -840,7 +855,10 @@ async def check_database() -> HealthCheckResult:
             s.exec(select(1))
         return HealthCheckResult.from_bool("database", True)
     except Exception as exc:
-        return HealthCheckResult(name="database", status=HealthStatus.FAIL, error=str(exc))
+        return HealthCheckResult(
+            name="database", status=HealthStatus.FAIL, error=str(exc)
+        )
+
 
 # Class-based (useful when state is needed)
 class RedisCheck:
@@ -852,7 +870,9 @@ class RedisCheck:
             await self._client.ping()
             return HealthCheckResult.from_bool("redis", True)
         except Exception as exc:
-            return HealthCheckResult(name="redis", status=HealthStatus.FAIL, error=str(exc))
+            return HealthCheckResult(
+                name="redis", status=HealthStatus.FAIL, error=str(exc)
+            )
 ```
 
 `HealthCheckResult` fields:
@@ -936,32 +956,33 @@ from app.core.deps import auth
 
 router = APIRouter()
 
+
 # Any authenticated user
 @router.get("/profile")
 async def get_profile(user: auth.CurrentUser):
     return {"id": user.id, "email": user.email, "role": user.role}
 
+
 # WRITER, ADMIN or SUPERADMIN
 @router.post("/items")
 async def create_item(
     writer: Annotated[UserModel, Depends(auth.get_current_active_writer)],
-):
-    ...
+): ...
+
 
 # ADMIN or SUPERADMIN
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: int,
     admin: Annotated[UserModel, Depends(auth.get_current_active_admin)],
-):
-    ...
+): ...
+
 
 # SUPERADMIN only
 @router.post("/admin/bootstrap")
 async def bootstrap(
     su: Annotated[UserModel, Depends(auth.get_current_active_superuser)],
-):
-    ...
+): ...
 ```
 
 Unauthorized requests receive:
@@ -989,15 +1010,14 @@ the issuer reads, so a key behaves identically at either end.
 @router.get("/items")
 async def list_items(
     principal: Annotated[ApiKeyPrincipal, Depends(auth.get_current_api_key_reader)],
-):
-    ...
+): ...
+
 
 # Writes — the owner must be at least WRITER *and* the key must be read_write.
 @router.post("/items")
 async def create_item(
     principal: Annotated[ApiKeyPrincipal, Depends(auth.get_current_api_key_writer)],
-):
-    ...
+): ...
 ```
 
 Effective authority is an intersection, and every dimension can only narrow it:
@@ -1073,11 +1093,15 @@ app = create_app(settings, router, health=HealthConfig(checks=[check_db]))
 # Pass header: X-Internal-Token: <PRIVATE_API_SECRET>
 
 # Option B — always public
-app = create_app(settings, router, health=HealthConfig(checks=[check_db], detail_public=True))
+app = create_app(
+    settings, router, health=HealthConfig(checks=[check_db], detail_public=True)
+)
+
 
 # Option C — custom authorizer
 async def is_internal(request: Request) -> bool:
     return request.client.host == "10.0.0.1"
+
 
 app = create_app(
     settings,
@@ -1120,12 +1144,13 @@ import uuid
 from sqlmodel import SQLModel, Field
 from auth_sdk_m8.models.shared import TimestampMixin
 
+
 class Item(TimestampMixin, SQLModel, table=True):
     __tablename__ = "app_items"
 
     id: int | None = Field(default=None, primary_key=True)
     name: str
-    owner_id: uuid.UUID   # references the authenticated user's UUID id
+    owner_id: uuid.UUID  # references the authenticated user's UUID id
 ```
 
 ---
@@ -1176,8 +1201,10 @@ my_service/
 from pydantic_settings import SettingsConfigDict
 from fastapi_m8 import ConsumerServiceSettings
 
+
 class Settings(ConsumerServiceSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
 
 settings = Settings()
 ```
@@ -1201,9 +1228,11 @@ from app.core.deps import auth, engine
 router = APIRouter(prefix="/items", tags=["items"])
 SessionDep = Annotated[Session, Depends(engine.session_dep)]
 
+
 @router.get("/")
 async def list_items(user: auth.CurrentUser, session: SessionDep):
     return {"owner": user.email}
+
 
 @router.delete("/{item_id}/admin")
 async def delete_item(
@@ -1219,11 +1248,16 @@ async def delete_item(
 from fastapi import APIRouter
 from sqlmodel import select
 from fastapi_m8 import (
-    AppLifecycle, HealthConfig, create_app, HealthCheckResult, HealthStatus,
+    AppLifecycle,
+    HealthConfig,
+    create_app,
+    HealthCheckResult,
+    HealthStatus,
 )
 from app.core.config import settings
 from app.core.deps import auth, engine
 from app.api.items import router as items_router
+
 
 async def check_db() -> HealthCheckResult:
     try:
@@ -1231,7 +1265,10 @@ async def check_db() -> HealthCheckResult:
             s.exec(select(1))
         return HealthCheckResult.from_bool("database", True)
     except Exception as exc:
-        return HealthCheckResult(name="database", status=HealthStatus.FAIL, error=str(exc))
+        return HealthCheckResult(
+            name="database", status=HealthStatus.FAIL, error=str(exc)
+        )
+
 
 api_router = APIRouter()
 api_router.include_router(items_router)
@@ -1259,8 +1296,10 @@ from fastapi.testclient import TestClient
 from pydantic_settings import SettingsConfigDict
 from fastapi_m8 import ConsumerServiceSettings, create_app
 
+
 class TestSettings(ConsumerServiceSettings):
     model_config = SettingsConfigDict(env_file=None)  # no file — all from kwargs
+
 
 @pytest.fixture()
 def settings():
@@ -1284,9 +1323,11 @@ def settings():
         DB_PASSWORD="test",
     )
 
+
 @pytest.fixture()
 def client(settings):
     from fastapi import APIRouter
+
     router = APIRouter()
     app = create_app(settings, router)
     return TestClient(app)
@@ -1297,6 +1338,7 @@ Use `anyio` for async tests (required by CLAUDE.md):
 ```python
 import pytest
 import anyio
+
 
 @pytest.mark.anyio
 async def test_health(client):
@@ -1337,10 +1379,10 @@ Check at runtime:
 ```python
 from fastapi_m8 import CAPABILITIES, __version__
 
-print(__version__)          # "3.0.0"
-print(CAPABILITIES)         # {"async": False, "plugin_system": False,
-                            #  "trace_context": False, "db_optional": True,
-                            #  "health_detail_gating": True}
+print(__version__)  # "3.0.0"
+print(CAPABILITIES)  # {"async": False, "plugin_system": False,
+#  "trace_context": False, "db_optional": True,
+#  "health_detail_gating": True}
 ```
 
 `create_async_app()` is a reserved stub for a future async app surface. Calling it

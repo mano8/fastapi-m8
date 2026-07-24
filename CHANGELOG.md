@@ -707,11 +707,18 @@ CONTENT_SECURITY_POLICY_ENABLED=true
 
   ```python
   # Before (1.0.x README — never worked)
-  app = create_app(settings, router, auth_deps=auth, db_engine=engine, health_checks=[check])
+  app = create_app(
+      settings, router, auth_deps=auth, db_engine=engine, health_checks=[check]
+  )
   # After (1.1.x — matches the code)
   from fastapi_m8 import AppLifecycle, HealthConfig
-  app = create_app(settings, router, health=HealthConfig(checks=[check]),
-                   lifecycle=AppLifecycle(auth_deps=auth, db_engine=engine))
+
+  app = create_app(
+      settings,
+      router,
+      health=HealthConfig(checks=[check]),
+      lifecycle=AppLifecycle(auth_deps=auth, db_engine=engine),
+  )
   ```
 
 - `auth-sdk-m8` pin → `>=0.7.1,<0.8.0` (lazy-redis + revocation default fix).
