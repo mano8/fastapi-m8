@@ -911,6 +911,21 @@ The value must match across the stack.
 **Stateless** — maximum scalability, simplest setup. Logout does not invalidate
 in-flight access tokens; they expire naturally.
 
+**Hybrid** — refresh-session state is revoked immediately (so a revoked user
+cannot mint a new access token), but an already-issued access token is not
+checked against the issuer and stays valid for the rest of its own lifetime.
+This is not a weaker or open-ended window: `TokenValidator.validate_access_token`
+enforces the JWT `exp` claim unconditionally, on every request, regardless of
+`TOKEN_MODE` (`auth_sdk_m8/security/token_validator.py`), and no `hybrid`/
+`stateless` code path in `build_auth_deps` skips or extends that check — only
+the *additional* revocation-client call is gated on `settings.is_stateful`. The
+stale-access-token window is therefore bounded by exactly
+`ACCESS_TOKEN_EXPIRE_MINUTES` and nothing longer; it must never be read as
+"immediate revocation" for the access token itself. Consumers that need
+immediate enforcement of a role/privilege downgrade — not just eventual
+expiry — must run `stateful` with `ACCESS_REVOCATION_FAILURE_MODE=fail_closed`
+instead of relying on hybrid/stateless.
+
 **Stateful** — highest security. On each request a consumer performs an HTTP call to
 `fa-auth-m8` to verify the JWT's JTI has not been revoked. Requires `INTROSPECTION_URL`
 and `PRIVATE_API_SECRET` in consumer settings.
