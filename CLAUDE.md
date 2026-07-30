@@ -1,7 +1,7 @@
 # fastapi-m8
+## Claude instructions
 
-# Claude instructions
+@REPOSITORY_CONTEXT.md
 
-Read `REPOSITORY_CONTEXT.md` for the repository-local context. A verified nearest
-workspace may provide optional supported enhancement; it is never required for
-standalone work.
+A verified nearest workspace may provide optional supported enhancement; it is
+never required for standalone work.
