@@ -402,6 +402,18 @@ untouched.
 | `SERVICE_TOKEN_SCOPES` | No | `["introspection"]` | Scopes requested when minting a service token; fa-auth narrows to the subset the bootstrap credential was granted. |
 | `SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS` | No | `30` | Refresh a cached service token this many seconds before its `exp` so a call never races expiry. |
 
+> **Ordinary expiry never surfaces as a `503`.** The refresh check runs lazily
+> on every call, before the private request is sent: once past
+> `exp - SERVICE_TOKEN_REFRESH_LEEWAY_SECONDS`, the client re-exchanges first.
+> Continuous traffic therefore never presents an actually expired service
+> token to the issuer. The one case where a `503` legitimately occurs is a
+> withdrawn/rotated consumer secret, or a request whose latency races the
+> leeway margin — the issuer answers `401`, the cached token is dropped, and
+> that single request fails closed while the next one re-mints and succeeds
+> (never retried automatically — introspection consumes the caller's quota).
+> Accepted operational behavior; documented rather than pre-empted by a
+> second re-mint mechanism, since the proactive one above already covers it.
+
 ### Remote API-Key Principal
 
 Resolves a user API key presented by an external client to its owner's current
