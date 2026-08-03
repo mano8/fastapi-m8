@@ -16,7 +16,7 @@ anyio==4.14.1
     #   fastapi-m8 (pyproject.toml)
     #   httpx
     #   starlette
-auth-sdk-m8[config,events,fastapi,observability,security]==3.1.0
+auth-sdk-m8[config,events,fastapi,observability,security]==3.1.2
     # via
     #   fastapi-m8
     #   fastapi-m8 (pyproject.toml)
