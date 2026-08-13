@@ -105,6 +105,14 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # change. The SDK floor remains >=3.1.0,<4.0.0 (no new SDK API required).
     # See CHANGELOG and Phase 7 (role-gated examples and privileged-action audit).
     "4.2": {"auth-sdk-m8": ">=3.1.0,<4.0.0"},
+    # 4.3 (MINOR) completes the SDK re-export surface so a consumer service can
+    # reach zero direct auth_sdk_m8 imports: has_minimum_role, RoleType,
+    # ValidationConstants, make_scrape_credential_guard and REGISTRY join the
+    # Tier-1 "Reusable SDK primitives" block in __init__.py. Additive only — no
+    # new SDK API is required, but the floor is stated as >=3.1.2 because that
+    # is the floor pyproject.toml actually declares and the version whose
+    # module layout these five names are re-exported from. See CHANGELOG.
+    "4.3": {"auth-sdk-m8": ">=3.1.2,<4.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
