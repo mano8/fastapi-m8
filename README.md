@@ -27,6 +27,7 @@ boilerplate from every consumer service.
    - [build_auth_deps()](#build_auth_deps)
    - [create_db_engine()](#create_db_engine)
    - [Health Checks](#health-checks)
+   - [Reusable SDK Primitives](#reusable-sdk-primitives)
 7. [Authentication](#authentication)
    - [Token Modes](#token-modes)
    - [Role System](#role-system)
@@ -905,6 +906,53 @@ class RedisCheck:
 | `LENIENT` (default) | Any check is `fail` |
 | `STRICT` | Any check is `fail` or `unknown` |
 
+### Reusable SDK Primitives
+
+`fastapi-m8` already depends on `auth-sdk-m8` and pins its major range, so it
+re-exports the SDK primitives a consumer service actually needs. **Import them
+from `fastapi_m8`, never from `auth_sdk_m8`.** A consumer service that imports
+the SDK directly takes on a second dependency whose major range it does not
+control, and can be broken by an SDK change `fastapi-m8` has already absorbed.
+
+| Re-export | SDK origin | Purpose |
+|---|---|---|
+| `has_superuser_privileges` | `auth_sdk_m8` | Dual-evidence superuser predicate (`role == SUPERADMIN` **and** `is_superuser`) |
+| `has_minimum_role` | `auth_sdk_m8.authorization` | Canonical role-ordering predicate — the single implementation of the hierarchy |
+| `RoleType` | `auth_sdk_m8.schemas.base` | Role enum; the argument type of `AuthDeps.require_role()` |
+| `BaseController` | `auth_sdk_m8.controllers.base` | CRUD controller base class |
+| `ResponseModelBase` | `auth_sdk_m8.schemas.base` | Base response schema |
+| `ResponseMessage` | `auth_sdk_m8.schemas.base` | Simple `{"message": ...}` response schema |
+| `ValidationConstants` | `auth_sdk_m8.schemas.shared` | Shared field length/format constants for consumer schemas |
+| `TimestampMixin` | `auth_sdk_m8.models.shared` | `created_at` / `updated_at` UTC columns for SQLModel tables |
+| `UserModel` | `auth_sdk_m8.schemas.user` | The authenticated principal every JWT dependency resolves to |
+| `find_dotenv` | `auth_sdk_m8.utils.paths` | Locate the service `.env` file |
+| `render_metrics` | `auth_sdk_m8.observability.metrics` | Render the Prometheus exposition payload |
+| `REGISTRY` | `auth_sdk_m8.observability.metrics` | The shared Prometheus collector registry `render_metrics` renders |
+| `make_scrape_credential_guard` | `auth_sdk_m8.security.guards` | Build the `/metrics` scrape-credential guard |
+
+```python
+from fastapi_m8 import (
+    REGISTRY,
+    BaseController,
+    ResponseMessage,
+    ResponseModelBase,
+    RoleType,
+    TimestampMixin,
+    UserModel,
+    ValidationConstants,
+    find_dotenv,
+    has_minimum_role,
+    has_superuser_privileges,
+    make_scrape_credential_guard,
+    render_metrics,
+)
+```
+
+Every name above is the SDK object itself, not a wrapper — `fastapi_m8.RoleType
+is auth_sdk_m8.schemas.base.RoleType` — so rerouting an import changes nothing
+at runtime, including SQLModel/SQLAlchemy table metadata built on
+`TimestampMixin`.
+
 ---
 
 ## Authentication
@@ -1163,13 +1211,15 @@ TABLES_PREFIX=app
 `SQLALCHEMY_DATABASE_URI` is assembled automatically. You can also set it directly
 to override the assembly.
 
-Define models with `TimestampMixin` from `auth-sdk-m8` (adds `created_at` /
-`updated_at` UTC columns):
+Define models with `TimestampMixin` (adds `created_at` / `updated_at` UTC
+columns). It originates in `auth-sdk-m8` and is
+[re-exported by `fastapi-m8`](#reusable-sdk-primitives) — import it from here,
+not from the SDK:
 
 ```python
 import uuid
 from sqlmodel import SQLModel, Field
-from auth_sdk_m8.models.shared import TimestampMixin
+from fastapi_m8 import TimestampMixin
 
 
 class Item(TimestampMixin, SQLModel, table=True):
@@ -1379,6 +1429,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `4.3.0` | `>=3.1.2, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.2.0` | `>=3.1.0, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.1.0` | `>=3.1.0, <4.0.0` | 3.11, 3.12, 3.13, 3.14 |
 | `4.0.0` | `>=3.0.0, <4.0.0` | 3.11, 3.12, 3.13, 3.14 |

@@ -80,6 +80,11 @@ class TestInstalledWheelImports:
         API-key route, and prove ``audit_api_key_routes`` flags it — the same
         behavior asserted against the source tree in test_route_audit.py, now
         proven against the packaged artifact.
+
+        Also imports the reusable SDK primitives from the built wheel. A
+        consumer service depends on ``fastapi-m8`` alone, so "the re-export
+        exists in the source tree" is not the guarantee it needs — "the
+        re-export ships in the artifact" is.
         """
         install_dir = tmp_path / "site"
         install_dir.mkdir()
@@ -141,7 +146,22 @@ settings = fm8.ConsumerServiceSettings(
 auth = fm8.build_auth_deps(settings)
 assert auth.get_current_api_key_principal is not None
 
-from auth_sdk_m8.schemas.base import RoleType
+from fastapi_m8 import (
+    REGISTRY,
+    RoleType,
+    ValidationConstants,
+    has_minimum_role,
+    make_scrape_credential_guard,
+)
+import auth_sdk_m8.observability.metrics as _sdk_metrics
+import auth_sdk_m8.schemas.base as _sdk_base
+
+assert has_minimum_role(RoleType.WRITER, RoleType.READER) is True
+assert has_minimum_role(RoleType.USER, RoleType.READER) is False
+assert RoleType is _sdk_base.RoleType
+assert REGISTRY is _sdk_metrics.REGISTRY
+assert ValidationConstants.KEY_REGEX.match("probe-key") is not None
+assert callable(make_scrape_credential_guard(None))
 
 assert callable(auth.get_current_active_reader)
 assert callable(auth.require_role)

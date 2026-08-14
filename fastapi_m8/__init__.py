@@ -27,11 +27,14 @@ Tier 2 — health building blocks::
     )
 
 Reusable SDK primitives (re-exported from auth-sdk-m8, so consumers depend
-only on fastapi-m8)::
+only on fastapi-m8 — a consumer service must never import ``auth_sdk_m8``
+directly)::
 
-    from fastapi_m8 import has_superuser_privileges
+    from fastapi_m8 import has_superuser_privileges, has_minimum_role, RoleType
     from fastapi_m8 import BaseController, ResponseModelBase, ResponseMessage
-    from fastapi_m8 import TimestampMixin, UserModel, find_dotenv, render_metrics
+    from fastapi_m8 import TimestampMixin, UserModel, ValidationConstants
+    from fastapi_m8 import find_dotenv, render_metrics, REGISTRY
+    from fastapi_m8 import make_scrape_credential_guard
 
 Tier 3 — informational / future::
 
@@ -43,11 +46,15 @@ Tier 3 — informational / future::
 # Reusable SDK primitives — re-exported so consumers only need fastapi-m8,
 # never a direct auth-sdk-m8 dependency.
 from auth_sdk_m8 import has_superuser_privileges
+from auth_sdk_m8.authorization import has_minimum_role
 from auth_sdk_m8.controllers.base import BaseController
 from auth_sdk_m8.models.shared import TimestampMixin
+from auth_sdk_m8.observability.metrics import REGISTRY
 from auth_sdk_m8.observability.metrics import render as render_metrics
-from auth_sdk_m8.schemas.base import ResponseMessage, ResponseModelBase
+from auth_sdk_m8.schemas.base import ResponseMessage, ResponseModelBase, RoleType
+from auth_sdk_m8.schemas.shared import ValidationConstants
 from auth_sdk_m8.schemas.user import UserModel
+from auth_sdk_m8.security.guards import make_scrape_credential_guard
 from auth_sdk_m8.utils.paths import find_dotenv
 
 from fastapi_m8._api_key import (
@@ -127,13 +134,18 @@ __all__ = [
     "HealthAggregatePolicy",
     # Reusable SDK primitives (from auth-sdk-m8)
     "has_superuser_privileges",
+    "has_minimum_role",
+    "RoleType",
     "BaseController",
     "ResponseModelBase",
     "ResponseMessage",
     "TimestampMixin",
     "UserModel",
+    "ValidationConstants",
     "find_dotenv",
     "render_metrics",
+    "REGISTRY",
+    "make_scrape_credential_guard",
     # Tier 3
     "create_async_app",
     "CAPABILITIES",

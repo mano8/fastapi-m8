@@ -1,0 +1,43 @@
+---
+# markdownlint configuration, also consumed by Codacy's markdownlint engine when
+# the repository is set to use its own configuration files.
+#
+# Scope note: a config file supplies markdownlint's *defaults* for every rule it
+# does not mention, so this file deliberately restates the rules this repository
+# already does not enforce. Without them, adding this file would turn one
+# reported rule into five and ~534 findings across README.md + CHANGELOG.md.
+
+# MD024/no-duplicate-heading — restrict to sibling headings.
+#
+# CHANGELOG.md follows Keep a Changelog, where every release section repeats the
+# same subsection names (### Added / ### Changed / ### Security / ### Docs …).
+# Under the default setting that makes each release after the first a stack of
+# duplicate-heading errors — 28 of them at 4.2.2, purely as a function of how
+# many releases the file records, and growing by ~3 with every release. The
+# duplication is the format, not a defect, and renaming the sections to be
+# unique would break the convention every reader of this changelog relies on.
+#
+# siblings_only flags a duplicate only when it shares a parent heading, so
+# "### Added" under [4.3.0] and "### Added" under [4.2.0] both pass, while two
+# "### Added" blocks inside one release — a real editing mistake — still fail.
+MD024:
+  siblings_only: true
+
+# MD013/line-length — off. README.md and CHANGELOG.md wrap prose for readability
+# rather than to a fixed column, and carry long table rows, URLs and code lines
+# that cannot be wrapped at all (328 findings). Python line length is enforced
+# separately and for real, by ruff (line-length = 88 in pyproject.toml).
+MD013: false
+
+# MD060/table-column-style — off. The documentation tables use compact pipes
+# (194 findings); this is a presentation preference with no effect on rendering.
+MD060: false
+
+# The three below are off to preserve the status quo, NOT because they are
+# wrong — each flags something worth fixing, and the count is small enough to
+# fix in one pass: MD031 blanks-around-fences (7), MD040 fenced-code-language
+# (3), MD028 no-blanks-blockquote (2). Left as a follow-up rather than folded
+# into an unrelated release commit; re-enable once those 12 spots are cleaned.
+MD031: false
+MD040: false
+MD028: false

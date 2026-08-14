@@ -11,9 +11,12 @@ consumer's own mypy run.
 
 from __future__ import annotations
 
+import importlib
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 import fastapi_m8
 
@@ -24,11 +27,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 _TYPING_SNIPPET = '''
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, Response
 
 from fastapi_m8 import (
     API_KEY_HEADER,
     CAPABILITIES,
+    REGISTRY,
     ApiKeyIntrospectionError,
     ApiKeyQuotaExceededError,
     AppLifecycle,
@@ -36,6 +42,7 @@ from fastapi_m8 import (
     AuthEventStreamClient,
     AuthStreamEvent,
     BareApiKeyDependency,
+    BaseController,
     COMPAT_MATRIX,
     ConsumerServiceSettings,
     DbEngine,
@@ -45,7 +52,13 @@ from fastapi_m8 import (
     HealthConfig,
     HealthStatus,
     InternalAuthProvider,
+    ResponseMessage,
+    ResponseModelBase,
+    RoleType,
     ServiceTokenInternalAuth,
+    TimestampMixin,
+    UserModel,
+    ValidationConstants,
     __version__,
     audit_api_key_routes,
     build_auth_deps,
@@ -58,10 +71,13 @@ from fastapi_m8 import (
     derive_api_key_introspection_url,
     derive_service_token_url,
     derive_stream_url,
+    find_dotenv,
+    has_minimum_role,
+    has_superuser_privileges,
+    make_scrape_credential_guard,
+    render_metrics,
 )
 from auth_sdk_m8.schemas.api_key import ApiKeyPrincipal
-from auth_sdk_m8.schemas.base import RoleType
-from auth_sdk_m8.schemas.user import UserModel
 
 
 def build(settings: ConsumerServiceSettings) -> AuthDeps:
@@ -111,6 +127,38 @@ def audit(app: FastAPI, auth: AuthDeps) -> list[BareApiKeyDependency]:
     if bare_dep is None:
         return []
     return audit_api_key_routes(app, bare_dependency=bare_dep)
+
+
+def use_role_predicates(user: UserModel) -> bool:
+    """The re-exported authorization predicates keep their SDK signatures."""
+    if has_superuser_privileges(user.role, user.is_superuser):
+        return True
+    return has_minimum_role(user.role, RoleType.WRITER)
+
+
+def use_metrics_surface(app: FastAPI, credential: str | None) -> None:
+    """render_metrics / REGISTRY / the scrape guard stay typed through the
+    re-export."""
+    guard = make_scrape_credential_guard(credential)
+
+    @app.get("/metrics", dependencies=[Depends(guard)])
+    def metrics() -> Response:
+        payload, content_type = render_metrics()
+        return Response(content=payload, media_type=content_type)
+
+    list(REGISTRY.collect())
+
+
+def use_schema_and_model_primitives() -> tuple[str, bool]:
+    """The schema/controller/model/constant primitives are real types, not Any."""
+    dotenv: Path = find_dotenv()
+    message: ResponseMessage = ResponseMessage(success=True, msg="ok")
+    wrapper: ResponseModelBase = ResponseModelBase(success=True, data=None)
+    controller: type[BaseController] = BaseController
+    mixin: type[TimestampMixin] = TimestampMixin
+    matched = ValidationConstants.KEY_REGEX.match(message.msg) is not None
+    assert controller is not None and mixin is not None and wrapper.success
+    return str(dotenv), matched
 '''
 
 
@@ -134,3 +182,43 @@ def test_all_exports_resolve_to_real_objects() -> None:
         assert hasattr(fastapi_m8, name), (
             f"{name!r} is listed in fastapi_m8.__all__ but is not importable"
         )
+
+
+# Every reusable SDK primitive fastapi-m8 re-exports, mapped to the module it
+# must come from. A consumer service imports these from fastapi_m8 and never
+# from auth_sdk_m8, so a re-export that silently becomes a local wrapper — or
+# quietly disappears — has to fail here rather than in three consumer repos.
+_SDK_REEXPORTS: dict[str, str] = {
+    "has_superuser_privileges": "auth_sdk_m8.authorization",
+    "has_minimum_role": "auth_sdk_m8.authorization",
+    "RoleType": "auth_sdk_m8.schemas.base",
+    "BaseController": "auth_sdk_m8.controllers.base",
+    "ResponseModelBase": "auth_sdk_m8.schemas.base",
+    "ResponseMessage": "auth_sdk_m8.schemas.base",
+    "ValidationConstants": "auth_sdk_m8.schemas.shared",
+    "TimestampMixin": "auth_sdk_m8.models.shared",
+    "UserModel": "auth_sdk_m8.schemas.user",
+    "find_dotenv": "auth_sdk_m8.utils.paths",
+    "REGISTRY": "auth_sdk_m8.observability.metrics",
+    "make_scrape_credential_guard": "auth_sdk_m8.security.guards",
+}
+
+
+@pytest.mark.parametrize(("name", "module_path"), sorted(_SDK_REEXPORTS.items()))
+def test_sdk_primitive_is_the_sdk_object_not_a_wrapper(
+    name: str, module_path: str
+) -> None:
+    """Each re-export *is* the SDK object, so rerouting an import is a no-op."""
+    module = importlib.import_module(module_path)
+    assert getattr(fastapi_m8, name) is getattr(module, name), (
+        f"fastapi_m8.{name} is not {module_path}.{name}"
+    )
+    assert name in fastapi_m8.__all__
+
+
+def test_render_metrics_is_the_sdk_render_function() -> None:
+    """The one re-export that is renamed still points at the SDK function."""
+    from auth_sdk_m8.observability import metrics
+
+    assert fastapi_m8.render_metrics is metrics.render
+    assert fastapi_m8.REGISTRY is metrics.REGISTRY

@@ -5,6 +5,99 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [4.3.0] — 2026-08-14 · Complete the SDK re-export surface
+
+Adds the five `auth-sdk-m8` primitives the consumer fleet still imports
+directly, so a consumer service can depend on `fastapi-m8` alone and reach
+**zero** `auth_sdk_m8` imports. Additive only: no existing export, signature or
+behavior changes, and no new `auth-sdk-m8` API is required.
+
+Until this release the boundary was literally unsatisfiable — five of the twelve
+symbols the fleet imports had no `fastapi_m8` re-export, so every consumer had
+to keep a direct SDK import or invent a local shim.
+
+### Added
+
+- **`has_minimum_role`** (from `auth_sdk_m8.authorization`) — the canonical
+  role-ordering predicate. One implementation of the hierarchy, re-exported
+  rather than re-derived at a call site.
+- **`RoleType`** (from `auth_sdk_m8.schemas.base`) — the role enum those
+  thresholds are expressed in, and the argument type of
+  `AuthDeps.require_role()`.
+- **`ValidationConstants`** (from `auth_sdk_m8.schemas.shared`) — the shared
+  field-length/format constants consumer schemas validate against.
+- **`make_scrape_credential_guard`** (from `auth_sdk_m8.security.guards`) — the
+  `/metrics` scrape-credential guard factory.
+- **`REGISTRY`** (from `auth_sdk_m8.observability.metrics`) — the shared
+  Prometheus collector registry that `render_metrics` (already re-exported)
+  renders.
+
+All five are documented in the module docstring's *Reusable SDK primitives*
+block and listed in `__all__`; `has_superuser_privileges`, `BaseController`,
+`ResponseModelBase`, `ResponseMessage`, `TimestampMixin`, `UserModel`,
+`find_dotenv` and `render_metrics` were already re-exported and are unchanged.
+
+### Changed
+
+- `COMPAT_MATRIX` gains its `"4.3"` row (`auth-sdk-m8 >=3.1.2,<4.0.0`). Without
+  it `_assert_compat()` would find no requirement for the new minor and silently
+  skip the startup check. The floor is stated as `>=3.1.2` — the floor
+  `pyproject.toml` already declares — rather than `4.2`'s looser `>=3.1.0`.
+
+### Documentation
+
+- `README.md` gains a **Reusable SDK Primitives** section listing every
+  re-exported symbol, its SDK origin and its purpose, and states the boundary
+  rule: a consumer service imports these from `fastapi-m8`, never from
+  `auth-sdk-m8`. The database example now imports `TimestampMixin` from
+  `fastapi_m8` accordingly, and the compatibility table gains the `4.3.0` row.
+
+### Tests
+
+- `tests/test_public_typing.py` type-checks all twelve re-exported primitives
+  through the public surface and asserts each one **is** the SDK object it
+  claims to re-export (identity, not just importability).
+- `tests/test_packaging.py`'s clean-install probe imports the five new names
+  from the built wheel, which is the acceptance condition for this release.
+
+---
+
+## [4.2.2] — 2026-07-31 · Dependency maintenance
+
+Reconstructed from Git history (`ed259a1`, `0c3123b`) — the release shipped
+without a changelog entry.
+
+### Changed
+
+- `auth-sdk-m8` floor raised to `>=3.1.2,<4.0.0` in `pyproject.toml` and pinned
+  to `3.1.2` in the compiled constraints files. No source change.
+
+---
+
+## [4.2.1] — 2026-07-31 · Re-exports, Python floor, docs
+
+Reconstructed from Git history (`86830ee` and the commits it bumped for:
+`b105e01`, `23020fe`, `be5c382`, `a57811c`) — the release shipped without a
+changelog entry.
+
+### Added
+
+- Re-export of the reusable `auth-sdk-m8` primitives (`has_superuser_privileges`,
+  `BaseController`, `ResponseModelBase`, `ResponseMessage`, `TimestampMixin`,
+  `UserModel`, `find_dotenv`, `render_metrics`) — the first half of the surface
+  `4.3.0` completes.
+
+### Changed
+
+- Python floor raised to `>=3.12`; truncated lockfiles regenerated.
+
+### Documentation
+
+- Documented hybrid mode's expiry-bounded revocation contract; reformatted the
+  embedded Python snippets in `CHANGELOG.md`/`README.md`.
+
+---
+
 ## [4.2.0] — 2026-07-23 · Role-capability demonstration surface (Phase 7)
 
 Adds a centralized `require_role(required_role: RoleType)` JWT dependency
