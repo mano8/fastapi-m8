@@ -5,7 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [4.3.0] — 2026-08-13 · Complete the SDK re-export surface
+## [4.3.0] — 2026-08-14 · Complete the SDK re-export surface
 
 Adds the five `auth-sdk-m8` primitives the consumer fleet still imports
 directly, so a consumer service can depend on `fastapi-m8` alone and reach
