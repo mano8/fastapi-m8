@@ -5,7 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [4.4.0] — 2026-08-15 · Fail closed on a missing compatibility row
+## [4.4.0] — 2026-08-15 · Fail closed on a missing compatibility row; make the bare install importable
+
+Two independent release-integrity fixes ship together.
 
 `_assert_compat()` read its requirements with
 `COMPAT_MATRIX.get(minor, {})`. A `fastapi-m8` minor with no row yielded an
@@ -13,6 +15,9 @@ empty dict, the validation loop ran zero times, and the function returned
 **successfully** — so a release that forgot its row disabled the
 `auth-sdk-m8` version check entirely, silently, for every consumer on that
 minor. That is fail-**open** on an authorization-adjacent dependency guard.
+
+Separately, the package's own minimal install had never been importable — see
+*Fixed*, below.
 
 ### Changed
 
@@ -36,8 +41,55 @@ minor. That is fail-**open** on an authorization-adjacent dependency guard.
   `test_compat_matrix_40_row_matches_pyproject_floor` is retained: it also
   backs the `4.0`-gate accept/reject tests.
 
+### Fixed
+
+- **`pip install fastapi-m8` with no extras now produces an importable
+  package.** Since `4.2.1` — when the SDK re-export block landed — a no-extras
+  install succeeded and then `import fastapi_m8` raised
+  `ModuleNotFoundError: No module named 'sqlalchemy'`, from `__init__.py`'s
+  module-level `from auth_sdk_m8.controllers.base import BaseController`.
+  SQLAlchemy arrives only through the `db` extra, so the "minimal (no database)"
+  install the README documents had never worked. Reproduced against the
+  published wheels for `4.2.0`, `4.2.1`, `4.2.2` and `4.3.0` in a clean
+  `python:3.14-slim` container. **No consumer in the fleet was exposed**: all
+  three declare `fastapi-m8[db,postgres(,mysql)]`, so they resolve SQLAlchemy
+  through the extra.
+
+  `BaseController` and `TimestampMixin` — the only two re-exports that need the
+  `db` extra — are now resolved by a module-level `__getattr__` (PEP 562)
+  instead of at import time. Both remain in `__all__`, remain importable as
+  `from fastapi_m8 import BaseController`, and **keep their object identity**:
+  the accessor returns the SDK object itself and caches it in the module
+  globals, so ORM models mixing in the re-exported `TimestampMixin` register
+  byte-identical metadata. Touching either without the extra now raises a
+  `ModuleNotFoundError` naming `fastapi-m8[db]` rather than a bare
+  `No module named 'sqlalchemy'`.
+
+  Option (a) of three was chosen — deferring the imports, rather than moving
+  `sqlalchemy` into the base dependencies or withdrawing the minimal-install
+  claim — because it keeps the SDK import boundary intact without forcing an ORM
+  on a service that has no database. **PEP 562 moves the failure from
+  `import fastapi_m8` to first attribute access; for these two names that is
+  still the consumer's own module-import time** (`BaseController` is subclassed
+  and `TimestampMixin` is mixed in at class-definition time), so the deferral
+  does not push an `ImportError` into a request path. This is recorded in the
+  `__getattr__` docstring so the laziness is not later mistaken for a
+  runtime-path hazard.
+
+- **`tests/test_packaging.py::test_package_imports_without_the_db_extra`** — a
+  no-extras clean-install probe alongside the existing one. The existing probe
+  installs `--no-deps` into a target dir and therefore runs against whatever the
+  development environment already has on `sys.path`, so it is structurally blind
+  to this class of defect; the new probe installs the same built wheel and runs
+  with `sqlalchemy`/`sqlmodel`/`alembic` made unimportable, asserting first that
+  the blocker really blocks. `tests/test_public_typing.py` gains four tests
+  covering lazy-lookup stability, the unknown-name `AttributeError`, and the
+  actionable missing-extra message.
+
 ### Notes
 
+- The bare-install fix ships **no version bump of its own**: it rides this same
+  `4.4.0`, per the wave's version-bump rule (one bump per unpublished release).
 - `COMPAT_MATRIX` and `_assert_compat` exist in `fastapi-m8` only; a sweep of
   the other nine Python repositories in the fleet found no second copy, so this
   guard has exactly one implementation.

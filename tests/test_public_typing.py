@@ -204,6 +204,57 @@ _SDK_REEXPORTS: dict[str, str] = {
 }
 
 
+# The two re-exports A31 made lazy. They live behind fastapi_m8.__getattr__ so
+# a no-extras install can import the package; everything below proves that the
+# laziness is invisible to a consumer that *has* the [db] extra.
+_LAZY_DB_REEXPORTS = ("BaseController", "TimestampMixin")
+
+
+@pytest.mark.parametrize("name", _LAZY_DB_REEXPORTS)
+def test_lazy_db_reexport_is_declared_and_deferred(name: str) -> None:
+    """The [db]-extra re-exports stay public but are not imported eagerly."""
+    assert name in fastapi_m8.__all__
+    assert name in fastapi_m8._DB_REEXPORTS
+    assert name in dir(fastapi_m8)
+
+
+@pytest.mark.parametrize("name", _LAZY_DB_REEXPORTS)
+def test_lazy_db_reexport_is_stable_across_lookups(name: str) -> None:
+    """Resolution is cached, so repeated access returns the same object.
+
+    ``A21`` rerouted 21 reparto DB models onto the re-exported
+    ``TimestampMixin`` and proved the ORM metadata byte-identical; an accessor
+    handing back a fresh object per lookup would silently undo that.
+    """
+    assert getattr(fastapi_m8, name) is getattr(fastapi_m8, name)
+
+
+def test_module_getattr_still_raises_for_an_unknown_name() -> None:
+    """Laziness must not turn a typo into something other than AttributeError."""
+    with pytest.raises(AttributeError, match="no attribute 'not_a_real_export'"):
+        fastapi_m8.not_a_real_export  # noqa: B018
+
+
+def test_module_getattr_names_the_db_extra_when_the_import_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing [db] extra produces an actionable error, not a bare
+    ``No module named 'sqlalchemy'``.
+
+    The real condition needs a no-extras install — proven end to end in
+    ``tests/test_packaging.py`` — so here the source module is pointed at
+    something unimportable to exercise the same branch in process.
+    """
+    monkeypatch.setitem(
+        fastapi_m8._DB_REEXPORTS, "BaseController", "auth_sdk_m8._absent_for_test"
+    )
+    monkeypatch.delitem(fastapi_m8.__dict__, "BaseController", raising=False)
+    with pytest.raises(ModuleNotFoundError, match=r"fastapi-m8\[db\]") as excinfo:
+        fastapi_m8.BaseController  # noqa: B018
+    assert "BaseController" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ModuleNotFoundError)
+
+
 @pytest.mark.parametrize(("name", "module_path"), sorted(_SDK_REEXPORTS.items()))
 def test_sdk_primitive_is_the_sdk_object_not_a_wrapper(
     name: str, module_path: str

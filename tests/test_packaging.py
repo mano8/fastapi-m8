@@ -188,3 +188,127 @@ print("OK")
             text=True,
         )
         assert result.stdout.strip().endswith("OK"), result.stdout + result.stderr
+
+    def test_package_imports_without_the_db_extra(
+        self, built_distributions: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """A **no-extras** install must still yield an importable package (A31).
+
+        ``pip install fastapi-m8`` with no extras used to install fine and then
+        fail at ``import fastapi_m8`` with ``ModuleNotFoundError: No module
+        named 'sqlalchemy'``, because ``__init__.py`` re-exported
+        ``BaseController`` / ``TimestampMixin`` at module level and both come
+        from SQLModel-backed SDK modules. SQLAlchemy arrives only through the
+        ``db`` extra, so the "minimal (no database)" install the README
+        documents never worked.
+
+        The probe above cannot see that class of defect: it installs
+        ``--no-deps`` into a target dir, so it runs against whatever the
+        *development* environment already has on ``sys.path`` — SQLAlchemy
+        included. This one installs the same wheel the same way but runs the
+        probe with ``sqlalchemy``/``sqlmodel``/``alembic`` made unimportable by
+        a ``sys.meta_path`` blocker, which is what a bare install actually
+        looks like from the package's point of view — and, unlike a real
+        ``pip install fastapi-m8``, needs no package index at test time.
+        """
+        install_dir = tmp_path / "site-no-extras"
+        install_dir.mkdir()
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--no-deps",
+                "--target",
+                str(install_dir),
+                str(built_distributions["wheel"]),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        probe = f"""
+import sys
+
+_DB_EXTRA_MODULES = ("sqlalchemy", "sqlmodel", "alembic")
+
+
+class _BlockDbExtra:
+    \"\"\"Make the [db] extra unimportable, as on a no-extras install.\"\"\"
+
+    def find_module(self, name, path=None):
+        return None
+
+    def find_spec(self, name, path=None, target=None):
+        root = name.split(".")[0]
+        if root in _DB_EXTRA_MODULES:
+            raise ModuleNotFoundError(f"No module named {{root!r}}", name=root)
+        return None
+
+
+for _mod in list(sys.modules):
+    if _mod.split(".")[0] in _DB_EXTRA_MODULES:
+        del sys.modules[_mod]
+sys.meta_path.insert(0, _BlockDbExtra())
+sys.path.insert(0, {str(install_dir)!r})
+
+# The blocker has to actually block, or this test proves nothing.
+try:
+    import sqlalchemy
+except ModuleNotFoundError:
+    pass
+else:
+    raise AssertionError("the [db]-extra blocker did not block sqlalchemy")
+
+# 1. The bare install imports. This is the whole point of A31.
+import fastapi_m8 as fm8
+
+# 2. The Tier 1 surface a database-free service uses is fully available.
+assert fm8.create_app is not None
+assert fm8.build_auth_deps is not None
+assert fm8.ConsumerServiceSettings is not None
+assert fm8.audit_api_key_routes is not None
+assert fm8.build_event_stream_client is not None
+
+# 3. So are the extra-free SDK re-exports.
+from fastapi_m8 import (
+    REGISTRY,
+    RoleType,
+    ValidationConstants,
+    has_minimum_role,
+    has_superuser_privileges,
+    make_scrape_credential_guard,
+)
+
+assert has_minimum_role(RoleType.WRITER, RoleType.READER) is True
+assert callable(has_superuser_privileges)
+assert callable(make_scrape_credential_guard(None))
+assert ValidationConstants.KEY_REGEX.match("probe-key") is not None
+assert list(REGISTRY.collect()) is not None
+
+# 4. Only the two [db]-extra re-exports are unavailable, and they say so
+#    in a way that names the fix rather than leaking a bare 'sqlalchemy'.
+for _name in ("BaseController", "TimestampMixin"):
+    try:
+        getattr(fm8, _name)
+    except ModuleNotFoundError as exc:
+        assert "fastapi-m8[db]" in str(exc), str(exc)
+        assert _name in str(exc), str(exc)
+    else:
+        raise AssertionError(f"{{_name}} resolved without the [db] extra")
+
+# 5. Both stay declared, so installing the extra is all that is missing.
+assert "BaseController" in fm8.__all__
+assert "TimestampMixin" in fm8.__all__
+assert "TimestampMixin" in dir(fm8)
+print("OK")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout.strip().endswith("OK"), result.stdout + result.stderr

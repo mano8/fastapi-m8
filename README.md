@@ -133,6 +133,20 @@ pip install "fastapi-m8[all]"
 
 **Runtime requirements:** Python 3.12+
 
+**What the minimal install gives you (since 4.4.0):** everything except the two
+SQLModel-backed re-exports. `create_app`, `build_auth_deps`,
+`ConsumerServiceSettings`, the health building blocks, the API-key and event-stream
+clients, and the extra-free SDK primitives (`RoleType`, `has_minimum_role`,
+`UserModel`, `REGISTRY`, …) all work with no extras. `BaseController` and
+`TimestampMixin` are resolved lazily and raise a `ModuleNotFoundError` naming
+`fastapi-m8[db]` if you touch them without that extra — install `[db]` (plus a
+driver) as soon as your service has a database.
+
+> Before 4.4.0 the minimal install did not actually work: `import fastapi_m8`
+> raised `ModuleNotFoundError: No module named 'sqlalchemy'` on any release from
+> 4.2.1 onward, because those two names were imported at module level. If you are
+> on 4.2.1–4.3.0 and want a database-free install, upgrade to 4.4.0.
+
 ---
 
 ## Quick Start
