@@ -5,6 +5,49 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [4.4.0] — 2026-08-15 · Fail closed on a missing compatibility row
+
+`_assert_compat()` read its requirements with
+`COMPAT_MATRIX.get(minor, {})`. A `fastapi-m8` minor with no row yielded an
+empty dict, the validation loop ran zero times, and the function returned
+**successfully** — so a release that forgot its row disabled the
+`auth-sdk-m8` version check entirely, silently, for every consumer on that
+minor. That is fail-**open** on an authorization-adjacent dependency guard.
+
+### Changed
+
+- **`_assert_compat()` now fails closed.** An unlisted minor raises
+  `RuntimeError` naming the missing row (`"… has no COMPAT_MATRIX row for
+  minor 'X.Y' …"`) instead of booting unchecked. The behavior for a *listed*
+  minor is unchanged.
+
+### Added
+
+- **`COMPAT_MATRIX["4.4"] = {"auth-sdk-m8": ">=3.1.2,<4.0.0"}`** — shipped in
+  the same commit as the fail-closed change, and load-bearing: without it this
+  release would be unbootable for every consumer resolving
+  `fastapi-m8>=4.3.0,<5.0.0`. No new SDK API is consumed, so the floor is
+  unchanged from `4.3`.
+- **`tests/test_compat.py::test_assert_compat_fails_closed_on_unlisted_minor`**
+  — reproduces the boot failure on an unlisted minor.
+- **`tests/test_compat.py::test_compat_matrix_current_minor_row_matches_pyproject_floor`**
+  — generalizes the existing `4.0`-specific row-vs-floor test to the *current*
+  minor, so a stale copy-pasted row can no longer pass.
+  `test_compat_matrix_40_row_matches_pyproject_floor` is retained: it also
+  backs the `4.0`-gate accept/reject tests.
+
+### Notes
+
+- `COMPAT_MATRIX` and `_assert_compat` exist in `fastapi-m8` only; a sweep of
+  the other nine Python repositories in the fleet found no second copy, so this
+  guard has exactly one implementation.
+- Historical rows are **not** revised by this release. The `"4.2"` row states
+  `>=3.1.0` where `pyproject.toml` at the time declared `>=3.1.2`; the new
+  row-vs-floor test is scoped to the current minor, and whether historical rows
+  are corrected or grandfathered remains an open decision.
+
+---
+
 ## [4.3.0] — 2026-08-14 · Complete the SDK re-export surface
 
 Adds the five `auth-sdk-m8` primitives the consumer fleet still imports

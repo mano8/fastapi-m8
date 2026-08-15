@@ -1,6 +1,9 @@
 """Tests for fastapi_m8._compat."""
 
+import re
 import threading
+import tomllib
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -13,6 +16,8 @@ from fastapi_m8._compat import (
 )
 from fastapi_m8._version import __version__
 
+_PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+
 
 def _reset_compat() -> None:
     """Reset the compat-check guard between tests."""
@@ -21,10 +26,48 @@ def _reset_compat() -> None:
         _COMPAT_STATE["auth_version"] = None
 
 
+def _current_minor() -> str:
+    return ".".join(__version__.split(".")[:2])
+
+
+def _pyproject_auth_sdk_specifier() -> str:
+    """Return the auth-sdk-m8 version specifier declared in pyproject.toml."""
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    for dep in data["project"]["dependencies"]:
+        # e.g. "auth-sdk-m8[config,security,...]>=3.1.2,<4.0.0"
+        match = re.fullmatch(r"auth-sdk-m8(?:\[[^\]]*\])?\s*(.+)", dep.strip())
+        if match:
+            return match.group(1).replace(" ", "")
+    raise AssertionError("pyproject.toml declares no auth-sdk-m8 dependency")
+
+
 def test_compat_matrix_has_current_minor() -> None:
-    minor = ".".join(__version__.split(".")[:2])
+    minor = _current_minor()
     assert minor in COMPAT_MATRIX
     assert "auth-sdk-m8" in COMPAT_MATRIX[minor]
+
+
+def test_compat_matrix_current_minor_row_matches_pyproject_floor() -> None:
+    """The current minor's row must state the floor pyproject.toml declares.
+
+    ``test_compat_matrix_has_current_minor`` only proves a row *exists*; a
+    stale copy-pasted row passes it. This asserts the row is also *right*.
+    """
+    assert COMPAT_MATRIX[_current_minor()]["auth-sdk-m8"] == (
+        _pyproject_auth_sdk_specifier()
+    )
+
+
+def test_assert_compat_fails_closed_on_unlisted_minor() -> None:
+    """A minor with no COMPAT_MATRIX row must refuse to boot, not skip the check."""
+    _reset_compat()
+    unlisted = "99.99.0"
+    assert "99.99" not in COMPAT_MATRIX
+    with patch("fastapi_m8._compat.__version__", unlisted):
+        with pytest.raises(RuntimeError, match="no COMPAT_MATRIX row"):
+            _assert_compat()
+    assert _COMPAT_STATE["checked"] is False
+    _reset_compat()
 
 
 def test_assert_compat_passes_with_installed_version() -> None:

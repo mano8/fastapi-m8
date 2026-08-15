@@ -1429,6 +1429,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `4.4.0` | `>=3.1.2, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.3.0` | `>=3.1.2, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.2.0` | `>=3.1.0, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.1.0` | `>=3.1.0, <4.0.0` | 3.11, 3.12, 3.13, 3.14 |
@@ -1451,6 +1452,11 @@ async def test_health(client):
 The compatibility matrix is enforced at startup via `COMPAT_MATRIX`. A
 `RuntimeError` is raised immediately if the installed `auth-sdk-m8` version is
 outside the supported range.
+
+Since `4.4.0` the check **fails closed**: if the running `fastapi-m8` minor has
+no `COMPAT_MATRIX` row at all, startup raises a `RuntimeError` naming the
+missing row instead of skipping validation. Before `4.4.0` an unlisted minor
+booted with the dependency check silently disabled.
 
 Check at runtime:
 
