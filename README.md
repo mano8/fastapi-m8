@@ -133,6 +133,20 @@ pip install "fastapi-m8[all]"
 
 **Runtime requirements:** Python 3.12+
 
+**What the minimal install gives you (since 4.4.0):** everything except the two
+SQLModel-backed re-exports. `create_app`, `build_auth_deps`,
+`ConsumerServiceSettings`, the health building blocks, the API-key and event-stream
+clients, and the extra-free SDK primitives (`RoleType`, `has_minimum_role`,
+`UserModel`, `REGISTRY`, …) all work with no extras. `BaseController` and
+`TimestampMixin` are resolved lazily and raise a `ModuleNotFoundError` naming
+`fastapi-m8[db]` if you touch them without that extra — install `[db]` (plus a
+driver) as soon as your service has a database.
+
+> Before 4.4.0 the minimal install did not actually work: `import fastapi_m8`
+> raised `ModuleNotFoundError: No module named 'sqlalchemy'` on any release from
+> 4.2.1 onward, because those two names were imported at module level. If you are
+> on 4.2.1–4.3.0 and want a database-free install, upgrade to 4.4.0.
+
 ---
 
 ## Quick Start
@@ -1429,6 +1443,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
+| `4.4.0` | `>=3.1.3, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.3.0` | `>=3.1.2, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.2.0` | `>=3.1.0, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.1.0` | `>=3.1.0, <4.0.0` | 3.11, 3.12, 3.13, 3.14 |
@@ -1451,6 +1466,11 @@ async def test_health(client):
 The compatibility matrix is enforced at startup via `COMPAT_MATRIX`. A
 `RuntimeError` is raised immediately if the installed `auth-sdk-m8` version is
 outside the supported range.
+
+Since `4.4.0` the check **fails closed**: if the running `fastapi-m8` minor has
+no `COMPAT_MATRIX` row at all, startup raises a `RuntimeError` naming the
+missing row instead of skipping validation. Before `4.4.0` an unlisted minor
+booted with the dependency check silently disabled.
 
 Check at runtime:
 

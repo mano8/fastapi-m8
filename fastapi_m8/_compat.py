@@ -113,6 +113,16 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # is the floor pyproject.toml actually declares and the version whose
     # module layout these five names are re-exported from. See CHANGELOG.
     "4.3": {"auth-sdk-m8": ">=3.1.2,<4.0.0"},
+    # 4.4 (MINOR) makes this guard fail closed: a fastapi-m8 minor with no row
+    # below can no longer boot unchecked (see _assert_compat). No new SDK API is
+    # consumed. This row is load-bearing for the very release that introduces
+    # the fail-closed behavior: without it, 4.4.0 would refuse to boot for
+    # every consumer. Floor raised in place to >=3.1.3 (was >=3.1.2 when this
+    # row was first added) before publish, once auth-sdk-m8 3.1.3 shipped —
+    # dependency maintenance only, no new SDK API, no source change on either
+    # side, rides this same still-unpublished 4.4.0 rather than a separate
+    # bump. See CHANGELOG.
+    "4.4": {"auth-sdk-m8": ">=3.1.3,<4.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
@@ -124,17 +134,36 @@ def _assert_compat() -> None:
     """
     Check installed dependency versions against COMPAT_MATRIX.
 
+    The check fails closed: a fastapi-m8 minor with no ``COMPAT_MATRIX`` row
+    raises instead of silently skipping validation. A release that forgets its
+    row would otherwise disable the dependency guard entirely, for every
+    consumer on that minor, with no signal.
+
     Raises
     ------
     RuntimeError
-        If a required dependency is outside its specified range.
+        If the running fastapi-m8 minor has no ``COMPAT_MATRIX`` row, or if a
+        required dependency is outside its specified range.
 
     """
     with _lock:
         if _COMPAT_STATE["checked"]:
             return
         minor = ".".join(__version__.split(".")[:2])
-        reqs = COMPAT_MATRIX.get(minor, {})
+        if minor not in COMPAT_MATRIX:
+            logger.error(
+                "fastapi-m8 %s has no COMPAT_MATRIX row for minor %s",
+                __version__,
+                minor,
+            )
+            raise RuntimeError(
+                f"fastapi-m8 {__version__} has no COMPAT_MATRIX row for minor "
+                f"'{minor}', so its dependency compatibility cannot be "
+                f"verified. This is a packaging defect in fastapi-m8: the "
+                f"release introducing {minor} must add a '{minor}' row to "
+                f"fastapi_m8._compat.COMPAT_MATRIX."
+            )
+        reqs = COMPAT_MATRIX[minor]
         for dist, spec in reqs.items():
             found = md.version(dist)
             if found not in SpecifierSet(spec):
