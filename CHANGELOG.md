@@ -26,13 +26,22 @@ Separately, the package's own minimal install had never been importable — see
   minor 'X.Y' …"`) instead of booting unchecked. The behavior for a *listed*
   minor is unchanged.
 
+- **`auth-sdk-m8` floor raised to `>=3.1.3,<4.0.0`** (was `>=3.1.2`) in
+  `pyproject.toml`, `constraints.txt`/`constraints-all.txt` (pinned to
+  `3.1.3`), and `COMPAT_MATRIX["4.4"]`, updated in place to match — `3.1.3` is
+  published, dependency maintenance only (no new SDK API, no source change on
+  either side). Folded into this still-unpublished release rather than a
+  separate bump, per the same one-bump-per-unpublished-release rule the
+  *Notes* below already applies to the bare-install fix.
+
 ### Added
 
-- **`COMPAT_MATRIX["4.4"] = {"auth-sdk-m8": ">=3.1.2,<4.0.0"}`** — shipped in
+- **`COMPAT_MATRIX["4.4"] = {"auth-sdk-m8": ">=3.1.3,<4.0.0"}`** — shipped in
   the same commit as the fail-closed change, and load-bearing: without it this
   release would be unbootable for every consumer resolving
-  `fastapi-m8>=4.3.0,<5.0.0`. No new SDK API is consumed, so the floor is
-  unchanged from `4.3`.
+  `fastapi-m8>=4.3.0,<5.0.0`. No new SDK API is consumed; the floor tracks
+  `pyproject.toml`'s (`>=3.1.2` at the time this row was first added, raised to
+  `>=3.1.3` before publish — see the dependency-maintenance bullet above).
 - **`tests/test_compat.py::test_assert_compat_fails_closed_on_unlisted_minor`**
   — reproduces the boot failure on an unlisted minor.
 - **`tests/test_compat.py::test_compat_matrix_current_minor_row_matches_pyproject_floor`**
@@ -88,8 +97,9 @@ Separately, the package's own minimal install had never been importable — see
 
 ### Notes
 
-- The bare-install fix ships **no version bump of its own**: it rides this same
-  `4.4.0`, per the wave's version-bump rule (one bump per unpublished release).
+- The bare-install fix and the `auth-sdk-m8 3.1.3` floor raise **ship no
+  version bump of their own**: both ride this same `4.4.0`, per the wave's
+  version-bump rule (one bump per unpublished release).
 - `COMPAT_MATRIX` and `_assert_compat` exist in `fastapi-m8` only; a sweep of
   the other nine Python repositories in the fleet found no second copy, so this
   guard has exactly one implementation.

@@ -115,11 +115,14 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     "4.3": {"auth-sdk-m8": ">=3.1.2,<4.0.0"},
     # 4.4 (MINOR) makes this guard fail closed: a fastapi-m8 minor with no row
     # below can no longer boot unchecked (see _assert_compat). No new SDK API is
-    # consumed, so the floor is unchanged from 4.3 — stated as >=3.1.2 because
-    # that is the floor pyproject.toml declares. This row is load-bearing for
-    # the very release that introduces the fail-closed behavior: without it,
-    # 4.4.0 would refuse to boot for every consumer. See CHANGELOG.
-    "4.4": {"auth-sdk-m8": ">=3.1.2,<4.0.0"},
+    # consumed. This row is load-bearing for the very release that introduces
+    # the fail-closed behavior: without it, 4.4.0 would refuse to boot for
+    # every consumer. Floor raised in place to >=3.1.3 (was >=3.1.2 when this
+    # row was first added) before publish, once auth-sdk-m8 3.1.3 shipped —
+    # dependency maintenance only, no new SDK API, no source change on either
+    # side, rides this same still-unpublished 4.4.0 rather than a separate
+    # bump. See CHANGELOG.
+    "4.4": {"auth-sdk-m8": ">=3.1.3,<4.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
