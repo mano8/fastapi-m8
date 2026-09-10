@@ -123,6 +123,16 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # side, rides this same still-unpublished 4.4.0 rather than a separate
     # bump. See CHANGELOG.
     "4.4": {"auth-sdk-m8": ">=3.1.3,<4.0.0"},
+    # 4.5 (MINOR) raises the floor to auth-sdk-m8 3.2.0, which carries W2.1's
+    # same-`kid` key-change recovery (a cached key rotates without a `kid`
+    # change now escalates through one throttled refresh instead of waiting
+    # out the JWKS cache TTL) and W2.2's multi-key JWKS parsing/docs. No new
+    # SDK API is consumed — both land entirely behind build_access_validator
+    # (see the fa-auth-m8 JWKS kid/key-binding plan, W2.1's surface
+    # constraint). This row is what makes the fix mandatory rather than
+    # optional: a consumer that resolves an older SDK is rejected at boot by
+    # _assert_compat instead of silently running the unfixed resolver.
+    "4.5": {"auth-sdk-m8": ">=3.2.0,<4.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
