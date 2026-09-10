@@ -5,6 +5,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [4.5.0] — 2026-09-10 · Raise the `auth-sdk-m8` floor for the JWKS `kid`/key-binding fix (`J3`)
+
+`W2A` of the workspace's `fa-auth-m8` JWKS `kid`/key-binding remediation plan
+(`fa-auth-jwks-kid-key-binding-plan-2026-09-08`, workspace-local, not tracked
+in this repository). `auth-sdk-m8 3.2.0` (published 2026-09-10) fixes `J3`'s
+consumer half — a
+resolver that served a stale cached key for up to `JWKS_CACHE_TTL_SECONDS`
+when a key rotated under an unchanged `kid` — but nothing in the fleet
+required it: no consumer service declares `auth-sdk-m8` directly (`F5`
+forbids it), and the compiled `constraints.txt` in every Python consumer
+pinned `==3.1.3` via `# via fastapi-m8`. This release is the only route by
+which the fix reaches a running consumer.
+
+### Changed
+
+- **`auth-sdk-m8` floor raised to `>=3.2.0,<4.0.0`** (was `>=3.1.3`) in
+  `pyproject.toml` and `COMPAT_MATRIX["4.5"]`. Per the workspace's explicit-pin
+  policy (consumer-alignment closure plan §0.5), the floor moves to the
+  newest published version, not to an inherited range.
+
+### Added
+
+- **`COMPAT_MATRIX["4.5"] = {"auth-sdk-m8": ">=3.2.0,<4.0.0"}`** — shipped in
+  the same commit as the floor bump, load-bearing per the `4.4` row's own
+  precedent: `_assert_compat()` fails closed on a missing row, so a `4.5.0`
+  without this row would refuse to boot for every consumer. No new SDK API is
+  consumed — `auth-sdk-m8 3.2.0`'s fix lands entirely behind
+  `build_access_validator`, so this floor bump is the whole change (see the
+  re-export gate measurement recorded against `auth-sdk-m8 3.1.3 → 3.2.0`).
+- `tests/test_compat.py::test_compat_matrix_45_row_matches_pyproject_floor`,
+  `test_assert_compat_45_row_accepts_intended_sdk_major`,
+  `test_assert_compat_45_row_rejects_old_major` — mirror the `4.0`-gate tests
+  for the new row: accepts an installed `3.2.0`, rejects `3.1.3`.
+
 ## [4.4.0] — 2026-08-15 · Fail closed on a missing compatibility row; make the bare install importable
 
 Two independent release-integrity fixes ship together.
