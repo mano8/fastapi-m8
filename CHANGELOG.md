@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [4.5.1] — 2026-09-12 · Move the compiled `auth-sdk-m8` pin to the `4.5.0` floor
+
+`4.5.0` raised the `pyproject.toml` floor to `auth-sdk-m8>=3.2.0,<4.0.0` but
+left both compiled constraint files pinning `==3.1.3`, so the lockfiles
+contradicted the declaration they were compiled from.
+
+### Fixed
+
+- **`constraints.txt` and `constraints-all.txt` re-pinned to
+  `auth-sdk-m8==3.2.0`.** Edited surgically rather than regenerated:
+  `auth-sdk-m8 3.2.0` has byte-identical dependency metadata to `3.1.3`, so
+  this is provably the complete diff a correct regeneration would produce for
+  the SDK change alone. A trial regeneration on this host's Python 3.14 (the
+  files were compiled under 3.12, unavailable here) moved 20+ unrelated pins
+  and rewrote the self-referential devcontainer path, so it was rejected in
+  favor of the surgical edit. A full regeneration on Python 3.12 remains
+  follow-on work.
+
 ## [4.5.0] — 2026-09-10 · Raise the `auth-sdk-m8` floor for the JWKS `kid`/key-binding fix (`J3`)
 
 `W2A` of the workspace's `fa-auth-m8` JWKS `kid`/key-binding remediation plan
