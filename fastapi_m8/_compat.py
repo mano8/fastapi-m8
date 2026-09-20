@@ -120,8 +120,8 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # every consumer. Floor raised in place to >=3.1.3 (was >=3.1.2 when this
     # row was first added) before publish, once auth-sdk-m8 3.1.3 shipped —
     # dependency maintenance only, no new SDK API, no source change on either
-    # side, rides this same still-unpublished 4.4.0 rather than a separate
-    # bump. See CHANGELOG.
+    # side, rode the same 4.4.0 rather than a separate bump; 4.4.0 is now
+    # tagged, merged and published. See CHANGELOG.
     "4.4": {"auth-sdk-m8": ">=3.1.3,<4.0.0"},
     # 4.5 (MINOR) raises the floor to auth-sdk-m8 3.2.0, which carries W2.1's
     # same-`kid` key-change recovery (a cached key rotates without a `kid`
