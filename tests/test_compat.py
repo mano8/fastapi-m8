@@ -123,7 +123,7 @@ def test_assert_compat_40_row_rejects_old_major() -> None:
 
 
 def test_compat_matrix_45_row_matches_pyproject_floor() -> None:
-    """The 4.5 gate is exactly the pyproject auth-sdk-m8 floor (3.2.1 since 4.5.2)."""
+    """The 4.5 gate is exactly the pyproject auth-sdk-m8 floor (3.2.1)."""
     assert COMPAT_MATRIX["4.5"] == {"auth-sdk-m8": ">=3.2.1,<4.0.0"}
 
 
@@ -131,7 +131,7 @@ def test_assert_compat_45_row_accepts_intended_sdk_major() -> None:
     """The 4.5 gate accepts the released SDK version it targets (3.2.1)."""
     _reset_compat()
     with (
-        patch("fastapi_m8._compat.__version__", "4.5.2"),
+        patch("fastapi_m8._compat.__version__", "4.5.0"),
         patch("fastapi_m8._compat.md.version", return_value="3.2.1"),
     ):
         _assert_compat()  # should not raise: 3.2.1 is in >=3.2.1,<4.0.0
@@ -144,7 +144,36 @@ def test_assert_compat_45_row_rejects_old_major() -> None:
     """The 4.5 gate rejects an SDK below its 3.2.1 floor."""
     _reset_compat()
     with (
-        patch("fastapi_m8._compat.__version__", "4.5.2"),
+        patch("fastapi_m8._compat.__version__", "4.5.0"),
+        patch("fastapi_m8._compat.md.version", return_value="3.2.0"),
+    ):
+        with pytest.raises(RuntimeError, match="requires auth-sdk-m8"):
+            _assert_compat()
+    _reset_compat()
+
+
+def test_compat_matrix_46_row_keeps_the_45_floor() -> None:
+    """The 4.6 gate is exactly the pyproject auth-sdk-m8 floor (3.2.1)."""
+    assert COMPAT_MATRIX["4.6"] == {"auth-sdk-m8": ">=3.2.1,<4.0.0"}
+
+
+def test_assert_compat_46_row_accepts_the_published_sdk() -> None:
+    """The 4.6 gate accepts auth-sdk-m8 3.2.1, its floor."""
+    _reset_compat()
+    with (
+        patch("fastapi_m8._compat.__version__", "4.6.0"),
+        patch("fastapi_m8._compat.md.version", return_value="3.2.1"),
+    ):
+        _assert_compat()
+    assert _COMPAT_STATE["auth_version"] == "3.2.1"
+    _reset_compat()
+
+
+def test_assert_compat_46_row_rejects_old_sdk() -> None:
+    """The 4.6 gate rejects an SDK below the 3.2.1 floor."""
+    _reset_compat()
+    with (
+        patch("fastapi_m8._compat.__version__", "4.6.0"),
         patch("fastapi_m8._compat.md.version", return_value="3.2.0"),
     ):
         with pytest.raises(RuntimeError, match="requires auth-sdk-m8"):
