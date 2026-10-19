@@ -44,6 +44,10 @@ from fastapi_m8 import (
     BareApiKeyDependency,
     BaseController,
     COMPAT_MATRIX,
+    ConsumerAuthenticationError,
+    ConsumerCredential,
+    ConsumerCredentialRegistry,
+    ConsumerScopeError,
     ConsumerServiceSettings,
     DbEngine,
     HealthAggregatePolicy,
@@ -51,6 +55,8 @@ from fastapi_m8 import (
     HealthCheckResult,
     HealthConfig,
     HealthStatus,
+    INTERNAL_CLIENT_HEADER,
+    INTERNAL_TOKEN_HEADER,
     InternalAuthProvider,
     ResponseMessage,
     ResponseModelBase,
@@ -64,6 +70,7 @@ from fastapi_m8 import (
     build_auth_deps,
     build_event_stream_client,
     build_internal_auth,
+    build_service_client_guard,
     capabilities,
     create_app,
     create_async_app,
@@ -149,6 +156,25 @@ def use_metrics_surface(app: FastAPI, credential: str | None) -> None:
     list(REGISTRY.collect())
 
 
+def use_service_client_guard(app: FastAPI, encoded: str) -> None:
+    """The service-client guard and its re-exported registry stay typed."""
+    credential: ConsumerCredential = ConsumerCredential.from_encoded(
+        "media-worker", encoded, ("execute:ocr",)
+    )
+    registry = ConsumerCredentialRegistry([credential])
+    guard = build_service_client_guard(registry, required_scopes=("execute:ocr",))
+
+    @app.post("/execute")
+    def route(client_id: str = Depends(guard)) -> dict[str, str]:
+        return {"client": client_id, "header": INTERNAL_CLIENT_HEADER}
+
+    errors: tuple[type[Exception], ...] = (
+        ConsumerAuthenticationError,
+        ConsumerScopeError,
+    )
+    assert INTERNAL_TOKEN_HEADER and errors
+
+
 def use_schema_and_model_primitives() -> tuple[str, bool]:
     """The schema/controller/model/constant primitives are real types, not Any."""
     dotenv: Path = find_dotenv()
@@ -201,6 +227,12 @@ _SDK_REEXPORTS: dict[str, str] = {
     "find_dotenv": "auth_sdk_m8.utils.paths",
     "REGISTRY": "auth_sdk_m8.observability.metrics",
     "make_scrape_credential_guard": "auth_sdk_m8.security.guards",
+    "ConsumerCredential": "auth_sdk_m8.security.consumer_auth",
+    "ConsumerCredentialRegistry": "auth_sdk_m8.security.consumer_auth",
+    "ConsumerAuthenticationError": "auth_sdk_m8.security.consumer_auth",
+    "ConsumerScopeError": "auth_sdk_m8.security.consumer_auth",
+    "INTERNAL_CLIENT_HEADER": "auth_sdk_m8.security.consumer_auth",
+    "INTERNAL_TOKEN_HEADER": "auth_sdk_m8.security.consumer_auth",
 }
 
 
