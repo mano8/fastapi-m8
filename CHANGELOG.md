@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
+## [4.5.2] — 2026-10-19 · Raise the `auth-sdk-m8` floor to `3.2.1`
+
+Dependency maintenance only: `auth-sdk-m8 3.2.1` carries pinned dependency
+and CI updates with no API or behaviour change, and no source changes here.
+
+### Changed
+
+- **`auth-sdk-m8` floor raised to `>=3.2.1,<4.0.0`** (was `>=3.2.0`) in
+  `pyproject.toml`, and `COMPAT_MATRIX["4.5"]` raised in place to match, so
+  the startup gate and the declared dependency stay identical.
+- **`constraints.txt` and `constraints-all.txt` re-pinned to
+  `auth-sdk-m8==3.2.1`** by a narrow regeneration under Python 3.12
+  (`pip-compile --upgrade-package auth-sdk-m8==3.2.1`, each file's recorded
+  command). No other pin moved.
+
+### Documentation
+
+- `README.md` `## Compatibility`: added the missing `4.5.0` row and the
+  `4.5.2` row.
+
 ## [4.5.1] — 2026-09-12 · Move the compiled `auth-sdk-m8` pin to the `4.5.0` floor
 
 `4.5.0` raised the `pyproject.toml` floor to `auth-sdk-m8>=3.2.0,<4.0.0` but
