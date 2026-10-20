@@ -132,7 +132,10 @@ COMPAT_MATRIX: dict[str, dict[str, str]] = {
     # constraint). This row is what makes the fix mandatory rather than
     # optional: a consumer that resolves an older SDK is rejected at boot by
     # _assert_compat instead of silently running the unfixed resolver.
-    "4.5": {"auth-sdk-m8": ">=3.2.0,<4.0.0"},
+    # Floor raised in place to >=3.2.1 by the 4.5.2 patch (auth-sdk-m8 3.2.1:
+    # dependency maintenance only, no new SDK API, no source change on either
+    # side). See CHANGELOG.
+    "4.5": {"auth-sdk-m8": ">=3.2.1,<4.0.0"},
 }
 
 _EXTRAS = "[config,security,fastapi,observability]"
