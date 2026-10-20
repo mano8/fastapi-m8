@@ -5,25 +5,52 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) · Versioning: 
 
 ---
 
-## [4.5.2] — 2026-10-19 · Raise the `auth-sdk-m8` floor to `3.2.1`
+## [4.6.0] - 2026-10-19
 
-Dependency maintenance only: `auth-sdk-m8 3.2.1` carries pinned dependency
-and CI updates with no API or behaviour change, and no source changes here.
+Adds the service-client guard a consumer needs when other services, not users,
+call its routes (the `ai-gateway-m8` execution routes are the first), and
+raises the `auth-sdk-m8` floor to `3.2.1`. Additive: no existing name changes
+and no dependency is added. Absorbs the unpublished `4.5.2` floor raise, which
+never shipped on its own.
+
+### Added
+
+- **`build_service_client_guard(registry, *, required_scopes)`**
+  (`fastapi_m8._service_client`). A FastAPI dependency that reads
+  `X-Internal-Client` and `X-Internal-Token` and returns the authenticated
+  client id. A missing header, an unknown client id or a wrong secret answers
+  `401` with one fixed body, and the registry's constant-time comparison runs in
+  each case (its throwaway credential answers an unknown id), so the guard adds
+  no client-enumeration oracle. An authenticated client lacking any required
+  scope answers `403`. The token is never logged or echoed. An empty scope set,
+  a bare `str` and an empty or non-string scope are refused at build time.
+- **Re-exports from `auth-sdk-m8`**: `ConsumerCredential`,
+  `ConsumerCredentialRegistry`, `ConsumerAuthenticationError`,
+  `ConsumerScopeError`, `INTERNAL_CLIENT_HEADER` and `INTERNAL_TOKEN_HEADER`,
+  each the SDK object itself, so a consumer still imports nothing from
+  `auth_sdk_m8`.
+- **`COMPAT_MATRIX["4.6"] = {"auth-sdk-m8": ">=3.2.1,<4.0.0"}`**, the
+  `pyproject.toml` floor. Every re-exported name already ships in
+  `auth-sdk-m8 3.2.0`; the floor is `3.2.1` for the dependency maintenance
+  below, not for the new names.
+- `tests/test_service_client.py`, plus the new names in
+  `tests/test_public_typing.py` and the `4.6` rows in `tests/test_compat.py`.
 
 ### Changed
 
 - **`auth-sdk-m8` floor raised to `>=3.2.1,<4.0.0`** (was `>=3.2.0`) in
-  `pyproject.toml`, and `COMPAT_MATRIX["4.5"]` raised in place to match, so
-  the startup gate and the declared dependency stay identical.
+  `pyproject.toml`, and `COMPAT_MATRIX["4.5"]` raised in place to match.
+  `auth-sdk-m8 3.2.1` carries pinned dependency and CI updates with no API or
+  behaviour change.
 - **`constraints.txt` and `constraints-all.txt` re-pinned to
   `auth-sdk-m8==3.2.1`** by a narrow regeneration under Python 3.12
   (`pip-compile --upgrade-package auth-sdk-m8==3.2.1`, each file's recorded
   command). No other pin moved.
 
-### Documentation
+### Fixed
 
-- `README.md` `## Compatibility`: added the missing `4.5.0` row and the
-  `4.5.2` row.
+- **README *Compatibility* table**: adds the `4.5.0` row it was missing,
+  beside the new `4.6.0` row.
 
 ## [4.5.1] — 2026-09-12 · Move the compiled `auth-sdk-m8` pin to the `4.5.0` floor
 

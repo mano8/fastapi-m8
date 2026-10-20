@@ -33,6 +33,7 @@ boilerplate from every consumer service.
    - [Role System](#role-system)
    - [Protecting Routes](#protecting-routes)
    - [API-key routes (remote principal)](#api-key-routes-remote-principal)
+   - [Service-client routes](#service-client-routes)
 8. [Health Endpoint](#health-endpoint)
 9. [Database Integration](#database-integration)
 10. [Pre-Start Script](#pre-start-script)
@@ -943,6 +944,12 @@ control, and can be broken by an SDK change `fastapi-m8` has already absorbed.
 | `render_metrics` | `auth_sdk_m8.observability.metrics` | Render the Prometheus exposition payload |
 | `REGISTRY` | `auth_sdk_m8.observability.metrics` | The shared Prometheus collector registry `render_metrics` renders |
 | `make_scrape_credential_guard` | `auth_sdk_m8.security.guards` | Build the `/metrics` scrape-credential guard |
+| `ConsumerCredential` | `auth_sdk_m8.security.consumer_auth` | One service client's salted secret digest and granted scopes |
+| `ConsumerCredentialRegistry` | `auth_sdk_m8.security.consumer_auth` | Client id → credential lookup with constant-time verification |
+| `ConsumerAuthenticationError` | `auth_sdk_m8.security.consumer_auth` | Unknown client id or wrong secret (indistinguishable) |
+| `ConsumerScopeError` | `auth_sdk_m8.security.consumer_auth` | Authenticated client lacking a required scope |
+| `INTERNAL_CLIENT_HEADER` | `auth_sdk_m8.security.consumer_auth` | `X-Internal-Client`, the calling service's id |
+| `INTERNAL_TOKEN_HEADER` | `auth_sdk_m8.security.consumer_auth` | `X-Internal-Token`, the calling service's secret |
 
 ```python
 from fastapi_m8 import (
@@ -1138,6 +1145,45 @@ Responses:
 - `503` — the principal could not be confirmed (issuer outage, timeout, open
   circuit, shed load, or a response this release cannot interpret). **Always a
   denial** — there is no fallback to a cached principal or to bare key validity
+
+### Service-client routes
+
+A route that other services call — not users — authenticates the caller with
+the fleet's per-consumer credential pair: `X-Internal-Client` names the calling
+service and `X-Internal-Token` carries its secret. Build the registry from the
+stored `sha256$<salt>$<digest>` strings (never plaintext secrets) and guard the
+route with `build_service_client_guard()`:
+
+```python
+from fastapi import Depends
+from fastapi_m8 import ConsumerCredentialRegistry, build_service_client_guard
+
+registry = ConsumerCredentialRegistry.from_encoded(
+    {"media-worker": (encoded_secret, ("execute:ocr",))}
+)
+require_ocr_client = build_service_client_guard(
+    registry, required_scopes=("execute:ocr",)
+)
+
+
+@router.post("/execute/ocr")
+async def execute_ocr(client_id: str = Depends(require_ocr_client)): ...
+```
+
+The dependency returns the authenticated client id. The client must hold
+**every** scope in `required_scopes`; the set may not be empty, and a bare
+string is refused because it would be read as one scope per character.
+
+Responses:
+
+- `401 Unauthorized` — a missing header, an unknown client id or a wrong
+  secret. All three return the same body, and the registry runs its
+  constant-time digest comparison in each (against a throwaway credential for
+  an unknown id), so a caller cannot tell which client ids exist
+- `403 Forbidden` — the client authenticated but lacks a required scope
+
+The guard never logs or echoes the token. It does not accept a JWT: a route
+that also needs a user must add a JWT dependency of its own.
 
 ---
 
@@ -1443,7 +1489,7 @@ async def test_health(client):
 
 | `fastapi-m8` | `auth-sdk-m8` | Python |
 |---|---|---|
-| `4.5.2` | `>=3.2.1, <4.0.0` | 3.12, 3.13, 3.14 |
+| `4.6.0` | `>=3.2.1, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.5.0` | `>=3.2.0, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.4.0` | `>=3.1.3, <4.0.0` | 3.12, 3.13, 3.14 |
 | `4.3.0` | `>=3.1.2, <4.0.0` | 3.12, 3.13, 3.14 |

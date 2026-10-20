@@ -15,6 +15,13 @@ Tier 1 — remote API-key principal (issuer introspection)::
     from fastapi_m8 import ApiKeyIntrospectionError, ApiKeyQuotaExceededError
     from fastapi_m8 import audit_api_key_routes, BareApiKeyDependency
 
+Tier 1 — service-client routes (other services calling this consumer)::
+
+    from fastapi_m8 import build_service_client_guard
+    from fastapi_m8 import ConsumerCredential, ConsumerCredentialRegistry
+    from fastapi_m8 import ConsumerAuthenticationError, ConsumerScopeError
+    from fastapi_m8 import INTERNAL_CLIENT_HEADER, INTERNAL_TOKEN_HEADER
+
 Tier 1 — auth event stream (fa-auth SSE bridge)::
 
     from fastapi_m8 import build_event_stream_client
@@ -57,6 +64,14 @@ from auth_sdk_m8.observability.metrics import render as render_metrics
 from auth_sdk_m8.schemas.base import ResponseMessage, ResponseModelBase, RoleType
 from auth_sdk_m8.schemas.shared import ValidationConstants
 from auth_sdk_m8.schemas.user import UserModel
+from auth_sdk_m8.security.consumer_auth import (
+    INTERNAL_CLIENT_HEADER,
+    INTERNAL_TOKEN_HEADER,
+    ConsumerAuthenticationError,
+    ConsumerCredential,
+    ConsumerCredentialRegistry,
+    ConsumerScopeError,
+)
 from auth_sdk_m8.security.guards import make_scrape_credential_guard
 from auth_sdk_m8.utils.paths import find_dotenv
 
@@ -99,6 +114,9 @@ from fastapi_m8._internal_auth import (
 
 # Tier 1 — API-key route-wiring audit (§3.3.1)
 from fastapi_m8._route_audit import BareApiKeyDependency, audit_api_key_routes
+
+# Tier 1 — service-client routes
+from fastapi_m8._service_client import build_service_client_guard
 from fastapi_m8._version import __version__
 from fastapi_m8.config import ConsumerServiceSettings
 
@@ -187,6 +205,14 @@ __all__ = [
     "InternalAuthProvider",
     "ServiceTokenInternalAuth",
     "derive_service_token_url",
+    # Tier 1 — service-client routes
+    "build_service_client_guard",
+    "ConsumerCredential",
+    "ConsumerCredentialRegistry",
+    "ConsumerAuthenticationError",
+    "ConsumerScopeError",
+    "INTERNAL_CLIENT_HEADER",
+    "INTERNAL_TOKEN_HEADER",
     # Tier 1 — auth event stream
     "build_event_stream_client",
     "AuthEventStreamClient",
